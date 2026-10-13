@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>Nehir</vendor>
+  <vendor_url>https://github.com/MustafaKemal0146/nehir</vendor_url>
+  <action id="org.nehir.nettune">
+    <description>Nehir: ağ ayarlarını indirme hızı için optimize et</description>
+    <description xml:lang="en">Nehir: tune network settings for faster downloads</description>
+    <message>Ağ (TCP/IP ve Wi-Fi) ayarlarını değiştirmek için yönetici parolası gerekli</message>
+    <message xml:lang="en">Authentication is required to change network (TCP/IP and Wi-Fi) settings</message>
+    <icon_name>network-wired</icon_name>
+    <defaults>
+      <allow_any>auth_admin</allow_any>
+      <allow_inactive>auth_admin</allow_inactive>
+      <allow_active>auth_admin_keep</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.exec.path">/usr/lib/nehir/nehir-nettune</annotate>
+  </action>
+</policyconfig>

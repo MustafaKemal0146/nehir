@@ -1,0 +1,124 @@
+#!/bin/sh
+# Nehir ağ optimizasyonu yardımcısı.
+#
+# Yalnızca aşağıda yazılı, sabit ve belgelenmiş ayarları yazar; hiçbir girdiyi komut olarak çalıştırmaz.
+# Değişiklik yapmadan önce özgün değerleri yedekler; `revert` ile hepsi geri alınır.
+#
+# Kullanım:  nehir-nettune apply  tcp [wifi]
+#            nehir-nettune revert tcp [wifi]
+#
+#   tcp  : BBR + fq (çekirdek sunuyorsa), büyük TCP tamponları, boşta kalan bağlantıda yavaş başlangıcı kapatma,
+#          MTU yoklama  →  /etc/sysctl.d/99-nehir-tcp.conf
+#   wifi : Wi-Fi güç tasarrufunu kapatma (iwlwifi vb. sürücülerde gecikme/düşük hız nedeni)
+#          →  /etc/NetworkManager/conf.d/99-nehir-wifi.conf
+#
+# Çıkış kodları: 0 başarılı · 64 hatalı kullanım · 77 yönetici yetkisi yok
+set -eu
+
+ROOT="${NEHIR_NETTUNE_ROOT:-}"          # yalnızca testler için (sahte kök dizin)
+SYSCTL="${NEHIR_SYSCTL:-sysctl}"
+MODPROBE="${NEHIR_MODPROBE:-modprobe}"
+NMCLI="${NEHIR_NMCLI:-nmcli}"
+
+SYSCTL_CONF="$ROOT/etc/sysctl.d/99-nehir-tcp.conf"
+MODULE_CONF="$ROOT/etc/modules-load.d/nehir-bbr.conf"
+WIFI_CONF="$ROOT/etc/NetworkManager/conf.d/99-nehir-wifi.conf"
+BACKUP_DIR="$ROOT/var/lib/nehir"
+BACKUP="$BACKUP_DIR/nettune-backup.conf"
+KEYS="net.ipv4.tcp_congestion_control net.core.default_qdisc net.core.rmem_max net.core.wmem_max net.ipv4.tcp_rmem net.ipv4.tcp_wmem net.ipv4.tcp_slow_start_after_idle net.ipv4.tcp_mtu_probing"
+
+usage() {
+  echo "kullanım: nehir-nettune apply|revert tcp [wifi]" >&2
+  exit 64
+}
+
+[ $# -ge 2 ] || usage
+OP="$1"; shift
+case "$OP" in apply|revert) ;; *) usage ;; esac
+for part in "$@"; do
+  case "$part" in tcp|wifi) ;; *) usage ;; esac
+done
+
+if [ -z "$ROOT" ] && [ "$(id -u)" != "0" ]; then
+  echo "yönetici yetkisi gerekli" >&2
+  exit 77
+fi
+
+apply_tcp() {
+  mkdir -p "$BACKUP_DIR" "$(dirname "$SYSCTL_CONF")"
+  # Özgün değerler yalnızca ilk uygulamada yedeklenir (ikinci uygulama yedeği bozmaz).
+  if [ ! -f "$BACKUP" ]; then
+    : > "$BACKUP.tmp"
+    for k in $KEYS; do
+      if v=$($SYSCTL -n "$k" 2>/dev/null); then
+        printf '%s = %s\n' "$k" "$v" >> "$BACKUP.tmp"
+      fi
+    done
+    mv "$BACKUP.tmp" "$BACKUP"
+  fi
+
+  bbr=no
+  $MODPROBE tcp_bbr 2>/dev/null || true
+  case " $($SYSCTL -n net.ipv4.tcp_available_congestion_control 2>/dev/null || true) " in
+    *" bbr "*) bbr=yes ;;
+  esac
+
+  {
+    echo "# Nehir tarafından yazıldı. Geri almak için Nehir → Ağ → Geri al, ya da bu dosyayı silin."
+    if [ "$bbr" = yes ]; then
+      echo "net.core.default_qdisc = fq"
+      echo "net.ipv4.tcp_congestion_control = bbr"
+    fi
+    echo "net.core.rmem_max = 33554432"
+    echo "net.core.wmem_max = 33554432"
+    echo "net.ipv4.tcp_rmem = 4096 131072 33554432"
+    echo "net.ipv4.tcp_wmem = 4096 65536 33554432"
+    echo "net.ipv4.tcp_slow_start_after_idle = 0"
+    echo "net.ipv4.tcp_mtu_probing = 1"
+  } > "$SYSCTL_CONF"
+
+  if [ "$bbr" = yes ]; then
+    # Açılışta sysctl, modül yüklenmeden çalışabilir; modülün önceden yüklenmesini sağla.
+    mkdir -p "$(dirname "$MODULE_CONF")"
+    echo "tcp_bbr" > "$MODULE_CONF"
+  fi
+  $SYSCTL -q -p "$SYSCTL_CONF" || true
+}
+
+revert_tcp() {
+  if [ -f "$BACKUP" ]; then
+    while IFS= read -r line; do
+      k=${line%% = *}
+      v=${line#* = }
+      case "$k" in net.*) $SYSCTL -q -w "$k=$v" 2>/dev/null || true ;; esac
+    done < "$BACKUP"
+  fi
+  rm -f "$SYSCTL_CONF" "$MODULE_CONF" "$BACKUP"
+}
+
+apply_wifi() {
+  mkdir -p "$(dirname "$WIFI_CONF")"
+  {
+    echo "# Nehir tarafından yazıldı (Wi-Fi güç tasarrufunu kapatır). Geri almak için bu dosyayı silin."
+    echo "[connection]"
+    echo "wifi.powersave = 2"
+  } > "$WIFI_CONF"
+  $NMCLI general reload conf 2>/dev/null || true
+  # Hemen etkili olsun diye (iw kuruluysa); aksi halde Wi-Fi'nin bir sonraki bağlanışında geçerli olur.
+  if [ -z "$ROOT" ] && command -v iw >/dev/null 2>&1; then
+    for d in /sys/class/net/*/wireless; do
+      [ -d "$d" ] || continue
+      iface=$(basename "$(dirname "$d")")
+      iw dev "$iface" set power_save off 2>/dev/null || true
+    done
+  fi
+}
+
+revert_wifi() {
+  rm -f "$WIFI_CONF"
+  $NMCLI general reload conf 2>/dev/null || true
+}
+
+for part in "$@"; do
+  "${OP}_${part}"
+done

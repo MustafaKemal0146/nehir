@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Name=Nehir
+GenericName=Download Manager
+GenericName[tr]=İndirme Yöneticisi
+Comment=Fast multi-connection download manager with browser integration
+Comment[tr]=Tarayıcı entegrasyonlu, hızlı ve çok bağlantılı indirme yöneticisi
+Exec=nehir %U
+Icon=nehir
+Terminal=false
+Categories=Network;FileTransfer;
+Keywords=download;manager;idm;yt-dlp;video;indir;
+StartupWMClass=nehir
