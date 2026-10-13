@@ -1,0 +1,15 @@
+[workspace]
+resolver = "2"
+members = ["crates/nehir-core", "crates/nehir-host", "crates/nehir-daemon", "crates/nehir-app"]
+# Tauri kabuğu sistem kütüphaneleri (webkit2gtk) gerektirir; varsayılan derlemeden hariç.
+default-members = ["crates/nehir-core", "crates/nehir-host", "crates/nehir-daemon"]
+
+[workspace.package]
+version = "1.0.0"
+edition = "2021"
+license = "MIT"
+authors = ["Nehir contributors"]
+
+[profile.release]
+lto = "thin"
+strip = true

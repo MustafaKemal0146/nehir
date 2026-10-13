@@ -1,0 +1,8 @@
+target/
+crates/nehir-app/gen/
+extension/dist/
+extension/chrome-key.pem
+node_modules/
+*.deb
+*.AppImage
+dist/

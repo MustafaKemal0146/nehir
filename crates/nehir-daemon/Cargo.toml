@@ -1,0 +1,16 @@
+[package]
+name = "nehir-daemon"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "nehir-daemon"
+path = "src/main.rs"
+
+[dependencies]
+nehir-core = { path = "../nehir-core" }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "signal"] }
+tokio-util = "0.7"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
