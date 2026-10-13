@@ -1,0 +1,53 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8">
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon48.png" width="30" height="30" alt="">
+    <div class="title"><strong>Nehir</strong><small id="version"></small></div>
+    <span class="chip" id="chip"><i></i><span id="chipText"></span></span>
+  </header>
+
+  <section id="offline" class="card warn" hidden>
+    <p id="offlineText"></p>
+    <button id="launch" class="primary"></button>
+    <p id="launchError" class="err" hidden></p>
+  </section>
+
+  <section class="actions2">
+    <button id="pageVideo" class="act video">
+      <svg viewBox="0 0 24 24"><rect x="3" y="5" width="13" height="14" rx="2"/><path d="M16 10l5-3v10l-5-3"/></svg>
+      <span id="pageVideoText"></span>
+    </button>
+    <button id="pageAudio" class="act audio">
+      <svg viewBox="0 0 24 24"><path d="M9 18V5l11-2v13"/><circle cx="6" cy="18" r="3"/><circle cx="17" cy="16" r="3"/></svg>
+      <span id="pageAudioText"></span>
+    </button>
+  </section>
+
+  <h2 id="mediaTitle"></h2>
+  <ul id="media"></ul>
+  <p id="noMedia" class="muted"></p>
+
+  <h2 id="downloadsTitle"></h2>
+  <ul id="downloads"></ul>
+  <p id="noDownloads" class="muted"></p>
+
+  <footer>
+    <label class="switch">
+      <input type="checkbox" id="intercept"><i></i>
+      <span><b id="captureText"></b><small id="captureHint"></small></span>
+    </label>
+    <label class="switch">
+      <input type="checkbox" id="overlay"><i></i>
+      <span><b id="overlayText"></b><small id="overlayHint"></small></span>
+    </label>
+  </footer>
+
+  <script src="i18n.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
