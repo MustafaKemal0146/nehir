@@ -1616,6 +1616,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "h2"
+version = "0.4.20"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7d29020232d6aa3fb1daca64c1127cf662cf97f254ae16c18c05b8ab635fc118"
+dependencies = [
+ "atomic-waker",
+ "bytes",
+ "fnv",
+ "futures-core",
+ "futures-sink",
+ "http",
+ "indexmap 2.14.2",
+ "slab",
+ "tokio",
+ "tokio-util",
+ "tracing",
+]
+
+[[package]]
 name = "half"
 version = "2.7.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1734,7 +1753,9 @@ checksum = "2c3e324da4c95177d6291d4c8730197c0d1822f8a9766814a4a44fa5ab797c9c"
 dependencies = [
  "atomic-waker",
  "bytes",
+ "futures-channel",
  "futures-core",
+ "h2",
  "http",
  "http-body",
  "httparse",
@@ -2290,6 +2311,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
+name = "md-5"
+version = "0.10.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf"
+dependencies = [
+ "cfg-if",
+ "digest",
+]
+
+[[package]]
 name = "memchr"
 version = "2.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2404,10 +2435,11 @@ dependencies = [
 
 [[package]]
 name = "nehir-app"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "dirs 5.0.1",
  "nehir-core",
+ "notify-rust",
  "serde",
  "serde_json",
  "tauri",
@@ -2426,17 +2458,20 @@ dependencies = [
 
 [[package]]
 name = "nehir-core"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "axum",
  "dirs 5.0.1",
  "futures-util",
  "libc",
+ "md-5",
  "percent-encoding",
  "regex",
  "reqwest 0.12.28",
  "serde",
  "serde_json",
+ "sha1",
+ "sha2",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -2450,7 +2485,7 @@ dependencies = [
 
 [[package]]
 name = "nehir-daemon"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "nehir-core",
  "tokio",
@@ -2461,7 +2496,7 @@ dependencies = [
 
 [[package]]
 name = "nehir-host"
-version = "1.0.0"
+version = "1.1.0"
 dependencies = [
  "serde_json",
 ]
@@ -3335,6 +3370,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-util",
+ "h2",
  "http",
  "http-body",
  "http-body-util",
@@ -3788,6 +3824,17 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "170fb83ab34de17dc69aa7c67482b22218ddb85da56546f9bd6b929e32a05930"
 dependencies = [
  "stable_deref_trait",
+]
+
+[[package]]
+name = "sha1"
+version = "0.10.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a978451301f4db1d02937a4ab3ccce137717b81826e79b7d49ffe3244a13c3b8"
+dependencies = [
+ "cfg-if",
+ "cpufeatures 0.2.17",
+ "digest",
 ]
 
 [[package]]
@@ -4594,6 +4641,7 @@ dependencies = [
  "bytes",
  "futures-core",
  "futures-sink",
+ "libc",
  "pin-project-lite",
  "tokio",
 ]

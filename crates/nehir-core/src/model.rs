@@ -134,6 +134,9 @@ pub struct NewDownload {
     /// Video kalitesini bu indirme için değiştirir: "audio" (MP3), "best", "1080" …
     #[serde(default)]
     pub quality: Option<String>,
+    /// Beklenen dosya özeti ("sha256:…" ya da yalnızca onaltılık metin). Varsa indirme bitince doğrulanır.
+    #[serde(default)]
+    pub checksum: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -196,6 +199,16 @@ pub struct Download {
     /// Son denemede ulaşılan bayt: ilerleme olduysa `retries` sıfırlanır.
     #[serde(default)]
     pub retry_mark: u64,
+    /// Kullanılan protokol ("HTTP/1.1", "HTTP/2").
+    #[serde(default)]
+    pub protocol: Option<String>,
+    /// Beklenen özet ("sha256:…"), hesaplanan özet ve karşılaştırma sonucu.
+    #[serde(default)]
+    pub checksum_expected: Option<String>,
+    #[serde(default)]
+    pub checksum_actual: Option<String>,
+    #[serde(default)]
+    pub checksum_ok: Option<bool>,
 }
 
 impl Download {

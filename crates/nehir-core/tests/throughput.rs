@@ -63,6 +63,7 @@ async fn loopback_throughput_by_connection_count() {
                 limiter: SpeedLimit::new(0),
                 max_attempts: 12,
                 backoff_scale: 1.0,
+                fallback_client: None,
             },
             client.clone(),
             CancellationToken::new(),

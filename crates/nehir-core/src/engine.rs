@@ -6,15 +6,19 @@
 //!   işçi, en çok baytı kalan parçayı ikiye bölüp yarısını devralır (kuyruk sonu hızlanır).
 //! * Sunucu 429/503 verirse işçi sayısı düşer, bekleme artar. Range yok sayılırsa tek akışa geçilir.
 //! * Parça durumu her ilerleme bildiriminde dışarı verilir; çağıran bunu diske yazarak devam etmeyi sağlar.
+//! * "Otomatik" protokolde HTTP/1.1 ile çok bağlantı açılır. Sunucu bağlantı sayısını sınırlarsa (429/503)
+//!   bağlantı kapatmak yerine önce HTTP/2'ye geçilir: parçalar tek bağlantıda ayrı akışlar olarak sürer.
+//! * Dosyanın yeri baştan ayrılır (`fallocate`): parçalanma azalır, yer yetmezse indirme başında anlaşılır.
 
 use crate::model::Segment;
 use futures_util::StreamExt;
 use reqwest::{header, Client, StatusCode};
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
+use std::os::fd::AsRawFd;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use tokio_util::sync::CancellationToken;
@@ -108,12 +112,16 @@ pub struct Config {
     pub max_attempts: u32,
     /// Bekleme sürelerinin çarpanı (1.0 normal; testlerde küçültülür).
     pub backoff_scale: f64,
+    /// Sunucu bağlantı sayısını sınırlarsa geçilecek istemci (HTTP/2; "otomatik" protokolde verilir).
+    pub fallback_client: Option<Client>,
 }
 
 #[derive(Debug, Clone)]
 pub struct Progress {
     pub received: u64,
     pub segments: Vec<Segment>,
+    /// Son yanıtın protokolü: 0 bilinmiyor, 1 HTTP/1.x, 2 HTTP/2, 3 HTTP/3.
+    pub protocol: u8,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -137,6 +145,65 @@ pub fn build_client() -> Result<Client, reqwest::Error> {
         .tcp_keepalive(Some(Duration::from_secs(30)))
         .redirect(reqwest::redirect::Policy::limited(10))
         .build()
+}
+
+/// HTTP/2 konuşabilen istemci. Protokol TLS (ALPN) ile anlaşılır; sunucu desteklemiyorsa HTTP/1.1 kullanılır.
+/// Bir sunucuya tek bağlantı açar ve parçaları onun içinde ayrı akışlar olarak ister: bağlantı sayısını
+/// sınırlayan sunucularda işe yarar.
+pub fn build_client_h2() -> Result<Client, reqwest::Error> {
+    Client::builder()
+        .connect_timeout(Duration::from_secs(20))
+        .pool_max_idle_per_host(8)
+        .pool_idle_timeout(Duration::from_secs(60))
+        .tcp_nodelay(true)
+        .tcp_keepalive(Some(Duration::from_secs(30)))
+        .http2_adaptive_window(true)
+        .http2_keep_alive_interval(Some(Duration::from_secs(20)))
+        .http2_keep_alive_timeout(Duration::from_secs(10))
+        .redirect(reqwest::redirect::Policy::limited(10))
+        .build()
+}
+
+fn protocol_code(v: reqwest::Version) -> u8 {
+    match v {
+        reqwest::Version::HTTP_2 => 2,
+        reqwest::Version::HTTP_3 => 3,
+        _ => 1,
+    }
+}
+
+/// Diskte boş yer yetmediğinde verilen hata (arayüz bunu çevirir): `disk_full:<gereken>:<boş>`.
+pub fn disk_full_error(needed: u64, free: u64) -> EngineError {
+    EngineError::Msg(format!("disk_full:{needed}:{free}"))
+}
+
+/// Klasörün bulunduğu diskte kullanılabilir boş yer (bayt).
+pub fn free_space(dir: &std::path::Path) -> Option<u64> {
+    use std::os::unix::ffi::OsStrExt;
+    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
+    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
+    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
+        return None;
+    }
+    Some(st.f_bavail as u64 * st.f_frsize as u64)
+}
+
+/// Dosyanın tüm yerini baştan ayırır. Dosya sistemi desteklemiyorsa boyutu ayarlamakla yetinir;
+/// yer yetmezse anlaşılır bir hata döner.
+fn preallocate(f: &File, total: u64) -> Result<(), EngineError> {
+    if total == 0 {
+        return Ok(());
+    }
+    let r = unsafe { libc::fallocate(f.as_raw_fd(), 0, 0, total as libc::off_t) };
+    if r == 0 {
+        return Ok(());
+    }
+    let e = std::io::Error::last_os_error();
+    if e.raw_os_error() == Some(libc::ENOSPC) {
+        return Err(disk_full_error(total, 0));
+    }
+    f.set_len(total)?;
+    Ok(())
 }
 
 fn apply_headers(mut rb: reqwest::RequestBuilder, headers: &[(String, String)]) -> reqwest::RequestBuilder {
@@ -207,6 +274,10 @@ pub fn plan_segments(total: u64, max_connections: u32, min_segment_size: u64) ->
 
 struct Shared {
     client: Client,
+    fallback: Option<Client>,
+    /// Sunucu sınırladığı için HTTP/2 istemcisine geçildi mi?
+    switched: AtomicBool,
+    protocol: AtomicU8,
     cfg_url: String,
     headers: Vec<(String, String)>,
     file: Arc<File>,
@@ -223,8 +294,8 @@ struct Shared {
 }
 
 enum SegError {
-    /// Sunucu sınırlaması: işçi sayısını düşür.
-    Throttle(u16),
+    /// Sunucu sınırlaması: (durum kodu, istek yedek istemciyle mi yapıldı). İşçi sayısı düşer ya da HTTP/2'ye geçilir.
+    Throttle(u16, bool),
     /// Geçici hata: aynı parçayı tekrar dene.
     Retry(EngineError),
     NoRanges,
@@ -244,7 +315,7 @@ where
     } else {
         let f = OpenOptions::new().write(true).create(true).truncate(true).open(&cfg.part_path)?;
         if let (Some(total), false) = (cfg.total, cfg.segments.is_empty()) {
-            f.set_len(total)?;
+            preallocate(&f, total)?;
         }
         f
     };
@@ -257,6 +328,9 @@ where
 
     let shared = Arc::new(Shared {
         client: client.clone(),
+        fallback: cfg.fallback_client.clone(),
+        switched: AtomicBool::new(false),
+        protocol: AtomicU8::new(0),
         cfg_url: cfg.url.clone(),
         headers: cfg.headers.clone(),
         file: file.clone(),
@@ -331,7 +405,7 @@ where
 fn snapshot(shared: &Shared) -> Progress {
     let segments = shared.segs.lock().unwrap().clone();
     let received = segments.iter().map(|s| s.received.min(s.len())).sum();
-    Progress { received, segments }
+    Progress { received, segments, protocol: shared.protocol.load(Ordering::Relaxed) }
 }
 
 async fn worker(shared: Arc<Shared>) {
@@ -353,12 +427,21 @@ async fn worker(shared: Arc<Shared>) {
                 set_fatal(&shared, e);
                 break;
             }
-            Err(SegError::Throttle(status)) => {
+            Err(SegError::Throttle(status, via_fallback)) => {
                 attempts += 1;
                 shared.queue.lock().unwrap().push_front(idx);
                 if attempts > shared.max_attempts {
                     set_fatal(&shared, EngineError::Http(status));
                     break;
+                }
+                // Sunucu çok bağlantıyı reddediyor: bağlantı kapatmak yerine önce HTTP/2'ye geç
+                // (parçalar tek bağlantıda ayrı akışlar olarak sürer, hız korunur).
+                if shared.fallback.is_some() && !via_fallback {
+                    if !shared.switched.swap(true, Ordering::SeqCst) {
+                        tracing::info!("sunucu bağlantı sayısını sınırlıyor (HTTP {status}); HTTP/2'ye geçiliyor");
+                    }
+                    sleep_or_abort(&shared, Duration::from_secs_f64(0.3 * shared.backoff_scale)).await;
+                    continue;
                 }
                 // Birden fazla işçi varsa biri emekli olur: bağlantı sayısı düşer.
                 if shared.alive.load(Ordering::SeqCst) > 1 {
@@ -427,16 +510,18 @@ async fn run_segment(shared: &Shared, idx: usize) -> Result<(), SegError> {
         }
         (s.cursor(), s.end)
     };
-    let rb = apply_headers(shared.client.get(&shared.cfg_url), &shared.headers)
-        .header(header::RANGE, format!("bytes={cursor}-{end}"));
+    let via_fallback = shared.switched.load(Ordering::SeqCst) && shared.fallback.is_some();
+    let client = if via_fallback { shared.fallback.as_ref().unwrap() } else { &shared.client };
+    let rb = apply_headers(client.get(&shared.cfg_url), &shared.headers).header(header::RANGE, format!("bytes={cursor}-{end}"));
     let resp = tokio::select! {
         r = rb.send() => r.map_err(|e| SegError::Retry(e.into()))?,
         _ = shared.abort.cancelled() => return Err(SegError::Stopped),
     };
+    shared.protocol.store(protocol_code(resp.version()), Ordering::Relaxed);
     match resp.status().as_u16() {
         206 => {}
         200 => return Err(SegError::NoRanges),
-        408 | 425 | 429 | 500 | 502 | 503 | 504 => return Err(SegError::Throttle(resp.status().as_u16())),
+        408 | 425 | 429 | 500 | 502 | 503 | 504 => return Err(SegError::Throttle(resp.status().as_u16(), via_fallback)),
         c => return Err(SegError::Fatal(EngineError::Http(c))),
     }
 
@@ -518,6 +603,7 @@ async fn run_single(
     if !resp.status().is_success() {
         return Err(EngineError::Http(resp.status().as_u16()));
     }
+    let protocol = protocol_code(resp.version());
     let total = resp.content_length().or(cfg.total).filter(|n| *n > 0);
     let mut stream = resp.bytes_stream();
     let mut received: u64 = 0;
@@ -539,7 +625,7 @@ async fn run_single(
         }};
     }
     let report = |received: u64| {
-        on_progress(Progress { received, segments: Vec::new() });
+        on_progress(Progress { received, segments: Vec::new(), protocol });
     };
 
     loop {

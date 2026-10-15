@@ -2,6 +2,21 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme [SemVer](https://semver.org/lang/tr/).
 
+## [1.1.0]: 2026-10-15
+
+### Eklendi
+- **İlk açılış sihirbazı:** indirme klasörü, tarayıcı eklentisi (eklentiler sayfasını açar, klasör yolunu panoya kopyalar, eklenti bağlanınca canlı gösterir) ve `yt-dlp` kurulumu. Ayarlar'dan yeniden açılabilir.
+- **İndirmeler bitince:** bilgisayarı uyut, kapat ya da Nehir'den çık. 60 saniyelik, iptal edilebilir geri sayım; bir kez uygulanır, kalıcı değildir.
+- **Dosya bütünlüğü doğrulama:** MD5, SHA-1, SHA-256, SHA-512. Eklenti özeti indirmenin başladığı sayfadan (dosya adının yanındaki değer) ya da sayfadaki `SHA256SUMS` / `*.sha256` dosyasından bulur; indirme bitince otomatik doğrulanır. Ekleme penceresinden ve indirme ayrıntılarından elle de verilebilir.
+- **Düğmeli bildirimler:** *Aç*, *Klasörü göster*, başarısızlıkta *Tekrar dene*; bildirime tıklamak Nehir'i öne getirir.
+- **Disk ön ayırma** (`fallocate`) ve indirme başında boş yer denetimi; yer yetmezse anlaşılır hata.
+- **HTTP/2 desteği:** "Otomatik" protokolde sunucu bağlantı sayısını sınırlarsa (429/503) bağlantı kapatmak yerine HTTP/2'ye geçilir. Ayarlardan "Yalnızca HTTP/1.1" ya da "HTTP/2" seçilebilir. Kullanılan protokol indirme ayrıntılarında görünür.
+
+### Düzeltildi
+- Uygulama/bilgisayar kapanırken yarıda kalan indirmeler açılışta duraklatılmış kalıyordu; artık kendiliğinden sürer (bilerek duraklatılanlar duraklatılmış kalır).
+- Paket, arayüzü gömülü dosyalardan sunmak yerine `localhost:5173`'e bağlanmaya çalışabiliyordu ("Could not connect to localhost").
+- Ekleme penceresinde "Video kalitesi" alanı video seçili değilken de görünüyordu.
+
 ## [1.0.0]: 2026-10-13
 
 İlk kararlı sürüm.
@@ -20,4 +35,5 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme [Se
 - HTTP istemcisi yalnızca HTTP/1.1 kullanır (HTTP/2 tüm parçaları tek TCP bağlantısında çoğullayıp çok bağlantılı indirmeyi boşa çıkarırdı); dosya başına en çok 32 bağlantı.
 - `.deb` paketi (kaldırılırken Nehir'in yazdığı ağ ayarlarını geri alır).
 
+[1.1.0]: https://github.com/MustafaKemal0146/nehir/releases/tag/v1.1.0
 [1.0.0]: https://github.com/MustafaKemal0146/nehir/releases/tag/v1.0.0

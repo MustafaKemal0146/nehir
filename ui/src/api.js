@@ -8,7 +8,7 @@ export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in
 
 const real = {
   list: () => invoke('list_downloads'),
-  add: (urls, video, quality) => invoke('add_downloads', { urls, video, quality: quality || null }),
+  add: (urls, video, quality, checksum) => invoke('add_downloads', { urls, video, quality: quality || null, checksum: checksum || null }),
   pause: (id) => invoke('pause', { id }),
   resume: (id) => invoke('resume', { id }),
   cancel: (id) => invoke('cancel', { id }),
@@ -29,6 +29,12 @@ const real = {
   netApply: (tcp, wifi) => invoke('net_apply', { tcp, wifi }),
   netRevert: (tcp, wifi) => invoke('net_revert', { tcp, wifi }),
   readClipboard: () => invoke('read_clipboard'),
+  verify: (id, expected) => invoke('verify_checksum', { id, expected: expected || null }),
+  getAfterAll: () => invoke('get_after_all'),
+  setAfterAll: (action) => invoke('set_after_all', { action }),
+  answerAfterAll: (now) => invoke('answer_after_all', { now }),
+  openExtensionsPage: () => invoke('open_extensions_page'),
+  openExtensionFolder: () => invoke('open_extension_folder'),
   on: (event, cb) => listen(event, (e) => cb(e.payload)),
   win: {
     minimize: () => getCurrentWindow().minimize(),
@@ -51,13 +57,13 @@ function makeMock() {
   const items = [
     { file_name: 'ubuntu-24.04.2-desktop-amd64.iso', category: 'archive', state: 'downloading', total: 6.1 * GB, frac: 0.42, speed: 38 * MB, n: 8 },
     { file_name: 'Büyük Nehir Belgeseli [aB3dE].mp4', category: 'video', state: 'downloading', total: 820 * MB, frac: 0.68, speed: 12 * MB, n: 4, kind: 'video', stage: 'video' },
-    { file_name: 'konferans-sunumu.pdf', category: 'document', state: 'completed', total: 18 * MB, frac: 1, speed: 0, n: 8 },
+    { file_name: 'konferans-sunumu.pdf', category: 'document', state: 'completed', total: 18 * MB, frac: 1, speed: 0, n: 8, ck: true },
     { file_name: 'lofi-mix-2025.mp3', category: 'music', state: 'completed', total: 96 * MB, frac: 1, speed: 0, n: 8 },
     { file_name: 'obs-studio_31.0_amd64.deb', category: 'program', state: 'paused', total: 120 * MB, frac: 0.31, speed: 0, n: 8 },
     { file_name: 'veri-seti.tar.zst', category: 'archive', state: 'queued', total: -1, frac: 0, speed: 0, n: 8 },
     { file_name: 'yedek-2024.zip', category: 'archive', state: 'failed', total: 2.4 * GB, frac: 0.12, speed: 0, n: 8, error: 'Sunucu HTTP 403 döndürdü' },
     { file_name: 'yarim-kalan-arsiv.zip', category: 'archive', state: 'waiting', total: 800 * MB, frac: 0.37, speed: 0, n: 8, error: 'Ağ hatası: error sending request' },
-    { file_name: 'kapak.png', category: 'image', state: 'completed', total: 3 * MB, frac: 1, speed: 0, n: 1 },
+    { file_name: 'kapak.png', category: 'image', state: 'completed', total: 3 * MB, frac: 1, speed: 0, n: 1, ck: false },
   ].concat(new URLSearchParams(location.search).has('long') ? [
     { file_name: 'https://www.netflix.com/watch/80014330?trackId=264293154&tctx=1%2C0%2C73dfcf43-28de-4d3b-8562-149233c040e0_113718699%2CeyJwYWdlSWQiOiJQU19IYjcwOGRkNi0wMTI4LTRkM2ItODU2Mi0xNDkyMzNjMDQwZTBfTDFfTjExIn0', category: 'video', state: 'failed', total: -1, frac: 0, speed: 0, n: 1, kind: 'video', error: 'ERROR: Unsupported URL: https://www.netflix.com/watch/80014330?trackId=264293154&tctx=1%2C0%2C73dfcf43-28de-4d3b-8562-149233c040e0_113718699%2CeyJwYWdlSWQiOiJQU19IYjcwOGRkNi0wMTI4LTRkM2ItODU2Mi0xNDkyMzNjMDQwZTBfTDFfTjExIn0' }
   ].map((x) => ({ ...x })) : []).map((m, i) => {
@@ -68,14 +74,21 @@ function makeMock() {
       total_bytes: total, received_bytes: total > 0 ? Math.floor(total * m.frac) : 0, speed: m.speed,
       segments: m.state === 'downloading' || m.state === 'paused' ? seg(total, m.n, m.frac) : [], segment_count: m.n, supports_ranges: true,
       error: m.error || null, stage: m.stage || null, created_at: now - i * 90, finished_at: m.state === 'completed' ? now - i * 60 : null,
+      protocol: m.kind === 'video' ? null : i === 0 ? 'HTTP/2' : 'HTTP/1.1',
+      checksum_expected: m.ck != null ? 'sha256:' + (m.ck ? '9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08' : '0'.repeat(64)) : null,
+      checksum_actual: m.ck != null ? 'sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08' : null,
+      checksum_ok: m.ck ?? null,
     };
   });
+  const params = new URLSearchParams(location.search);
+  let afterAll = 'none';
   const listeners = new Map();
   const emit = (ev, payload) => (listeners.get(ev) || []).forEach((cb) => cb(payload));
   let settings = {
     download_dir: '/home/kullanici/İndirilenler', categorize: true, max_connections: 8, max_concurrent: 3, speed_limit_kbps: 0,
     port: 48213, capture_extensions: 'zip rar 7z iso deb pdf mp4 mkv mp3'.split(' '), language: 'auto', monitor_clipboard: true,
     notifications: true, ytdlp_path: '', video_quality: 'best', close_to_tray: true, autostart: false,
+    http_version: 'auto', onboarded: !params.has('onboard'),
   };
   setInterval(() => {
     for (const d of items) {
@@ -124,6 +137,17 @@ function makeMock() {
     netApply: async () => { await new Promise((r) => setTimeout(r, 600)); },
     netRevert: async () => { await new Promise((r) => setTimeout(r, 600)); },
     readClipboard: async () => '',
+    verify: async (id, expected) => {
+      if (expected && !/^(?:(md5|sha-?1|sha-?256|sha-?512)\s*:\s*)?([a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}|[a-f0-9]{128})$/i.test(expected.trim())) throw 'invalid_checksum';
+      const d = items.find((x) => x.id === id); if (!d) return;
+      d.stage = 'verifying'; emit('download-updated', { ...d });
+      setTimeout(() => { d.stage = null; d.checksum_actual = 'sha256:' + 'ab12'.repeat(16); d.checksum_ok = expected ? false : null; emit('download-updated', { ...d }); }, 900);
+    },
+    getAfterAll: async () => afterAll,
+    setAfterAll: async (a) => { afterAll = a; emit('after-all-changed', a); if (params.has('countdown') && a !== 'none') setTimeout(() => emit('after-all-countdown', { action: a, seconds: 60 }), 300); return a; },
+    answerAfterAll: async (now) => { if (!now) { afterAll = 'none'; emit('after-all-changed', 'none'); } },
+    openExtensionsPage: async () => 'Google Chrome',
+    openExtensionFolder: async () => {},
     on: async (event, cb) => { listeners.set(event, [...(listeners.get(event) || []), cb]); return () => {}; },
     win: { minimize: async () => {}, toggleMaximize: async () => {}, close: async () => {} },
   };

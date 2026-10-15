@@ -39,11 +39,17 @@ const DRM_HOSTS = /(netflix|primevideo|disneyplus|hbomax|max\.com|spotify|tv\.ap
 function errorText(d) {
   const e = String(d.error || '');
   if (e === 'ytdlp_missing') return t('ytdlpMissing');
+  const disk = /^disk_full:(\d+):(\d+)$/.exec(e);
+  if (disk) return Number(disk[2]) > 0 ? t('err.diskFull', { need: fmtSize(Number(disk[1])), free: fmtSize(Number(disk[2])) }) : t('err.diskFullShort');
+  if (e === 'checksum_read_failed') return t('err.checksumRead');
   if (/unsupported url/i.test(e)) return DRM_HOSTS.test(d.url) ? t('err.drm') : t('err.unsupported');
   if (/http error 403|forbidden|sign in|login/i.test(e)) return t('err.forbidden');
   return e.length > 160 ? e.slice(0, 157) + '…' : e;
 }
-const updatableError = (d) => !/unsupported url|ytdlp_missing/i.test(String(d.error || ''));
+const updatableError = (d) => !/unsupported url|ytdlp_missing|disk_full/i.test(String(d.error || ''));
+const toastError = (e) => toast(String(e) === 'invalid_checksum' ? t('ck.invalid') : `${t('toast.error')}: ${e}`, 'bad');
+const algoName = (h) => ({ md5: 'MD5', sha1: 'SHA-1', sha256: 'SHA-256', sha512: 'SHA-512' }[String(h || '').split(':')[0]] || '');
+const hexOf = (h) => String(h || '').split(':').pop();
 
 function stageText(stage) {
   if (!stage) return '';
@@ -136,12 +142,15 @@ function updateRow(d) {
   prog.hidden = d.state === 'cancelled';
 
   const eta = d.speed > 0 && d.total_bytes > 0 ? fmtEta((d.total_bytes - d.received_bytes) / d.speed) : '';
-  const stateLabel = d.state === 'processing' || d.state === 'downloading' ? (stageText(d.stage) || t('state.' + d.state)) : t('state.' + d.state);
-  const parts = [`<span class="state ${d.state}">${esc(stateLabel)}</span>`];
+  const stateLabel = d.stage === 'verifying' ? t('stage.verifying') : d.state === 'processing' || d.state === 'downloading' ? (stageText(d.stage) || t('state.' + d.state)) : t('state.' + d.state);
+  const parts = [`<span class="state ${d.stage === 'verifying' ? 'processing' : d.state}">${esc(stateLabel)}</span>`];
   if (d.state === 'completed') parts.push(esc(fmtSize(d.total_bytes)));
   else if (d.total_bytes > 0) parts.push(`${esc(fmtSize(d.received_bytes))} / ${esc(fmtSize(d.total_bytes))} (${pct.toFixed(0)}%)`);
   else if (d.received_bytes > 0) parts.push(esc(fmtSize(d.received_bytes)));
   if (ACTIVE.has(d.state) && d.speed > 0) parts.push(esc(fmtSpeed(d.speed)));
+  if (d.state === 'completed' && d.stage !== 'verifying' && d.checksum_ok != null) {
+    parts.push(`<span class="ck ${d.checksum_ok ? 'ok' : 'bad'}" title="${esc(d.checksum_ok ? t('ck.okLong') : t('ck.badLong'))}">${icon(d.checksum_ok ? 'shield' : 'alert', 13)} ${esc(d.checksum_ok ? t('ck.ok') : t('ck.bad'))} · ${esc(algoName(d.checksum_actual || d.checksum_expected))}</span>`);
+  }
   if (eta) parts.push(`${esc(eta)} ${esc(t('eta'))}`);
   if (d.state === 'failed' && d.error) parts.push(`<span class="err-text" title="${esc(d.error)}">${esc(errorText(d))}</span>`);
   if (d.state === 'waiting') parts.push(`<span title="${esc(d.error || '')}">${esc(t('err.waiting'))}</span>`);
@@ -170,6 +179,7 @@ function updateRow(d) {
   let detail = row.querySelector('.detail');
   if (expanded.has(d.id)) {
     if (!detail) { detail = el('div', 'detail'); row.append(detail); }
+    if (detail.contains(document.activeElement) && document.activeElement.tagName === 'INPUT') return; // yazılırken yeniden çizme
     const segs = (d.segments || []).map((s) => {
       const len = s.end - s.start + 1;
       return `<i style="flex:${len}"><b style="width:${Math.min(100, (s.received / len) * 100)}%"></b></i>`;
@@ -177,9 +187,48 @@ function updateRow(d) {
     detail.innerHTML = `
       <div><span class="k">${esc(t('detail.url'))}</span><span class="val">${esc(d.url)}</span></div>
       <div><span class="k">${esc(t('detail.path'))}</span><span class="val">${esc(d.dir + '/' + d.file_name)}</span></div>
-      <div>${d.kind === 'video' ? 'yt-dlp' : d.supports_ranges ? `${esc(t('detail.ranges'))} · ${d.segments.length || d.segment_count} ${esc(t('parts'))}` : esc(t('detail.noRanges'))}</div>
+      <div>${d.kind === 'video' ? 'yt-dlp' : d.supports_ranges ? `${esc(t('detail.ranges'))} · ${d.segments.length || d.segment_count} ${esc(t('parts'))}` : esc(t('detail.noRanges'))}${d.protocol ? ` · <span class="k" style="margin:0 4px 0 0">${esc(t('detail.protocol'))}</span>${esc(d.protocol)}` : ''}</div>
       ${segs ? `<div><span class="k">${esc(t('detail.segments'))}</span></div><div class="segs">${segs}</div>` : ''}`;
+    if (d.state === 'completed') detail.append(checksumPanel(d));
   } else if (detail) detail.remove();
+}
+
+// Tamamlanmış dosyanın bütünlük doğrulaması: sonuç, hesaplanan özet ve elle karşılaştırma.
+function checksumPanel(d) {
+  const box = el('div', 'ck-panel');
+  box.append(el('div', null, `<span class="k">${esc(t('detail.checksum'))}</span>`));
+  const verifying = d.stage === 'verifying';
+  if (verifying) box.append(el('div', 'ck-line', `<span class="spinner"></span>${esc(t('stage.verifying'))}`));
+  else if (d.checksum_ok != null) box.append(el('div', `ck-result ${d.checksum_ok ? 'ok' : 'bad'}`, `${icon(d.checksum_ok ? 'shield' : 'alert', 16)}<span>${esc(d.checksum_ok ? t('ck.okLong') : t('ck.badLong'))}</span>`));
+  const hashLine = (label, h) => {
+    const line = el('div', 'ck-line', `<span class="k">${esc(label)} · ${esc(algoName(h))}</span><code>${esc(hexOf(h))}</code>`);
+    const c = el('button', 'mini', icon('copy', 14)); c.title = t('ck.copy');
+    c.onclick = (e) => { e.stopPropagation(); api.copyText(hexOf(h)); toast(t('ck.copied'), 'ok'); };
+    line.append(c);
+    return line;
+  };
+  if (d.checksum_expected && d.checksum_ok === false) box.append(hashLine(t('ck.expected'), d.checksum_expected));
+  if (d.checksum_actual && !verifying) box.append(hashLine(t('ck.actual'), d.checksum_actual));
+  if (!verifying) {
+    const form = el('div', 'pair');
+    const input = el('input'); input.type = 'text'; input.placeholder = t('ck.placeholder'); input.spellcheck = false;
+    const go = el('button', null, esc(t('ck.verify'))); go.type = 'button';
+    const run = async (e) => {
+      e?.stopPropagation();
+      try { await api.verify(d.id, input.value.trim() || null); input.blur(); } catch (err) { toastError(err); }
+    };
+    go.onclick = run;
+    input.onkeydown = (e) => { if (e.key === 'Enter') run(e); };
+    input.onclick = (e) => e.stopPropagation();
+    form.append(input, go);
+    if (!d.checksum_actual) {
+      const calc = el('button', null, esc(t('ck.compute'))); calc.type = 'button';
+      calc.onclick = async (e) => { e.stopPropagation(); try { await api.verify(d.id, null); } catch (err) { toastError(err); } };
+      form.append(calc);
+    }
+    box.append(form);
+  }
+  return box;
 }
 
 function renderList() {
@@ -226,6 +275,7 @@ async function openAddDialog(prefill) {
     try { const c = (await api.readClipboard())?.trim?.() || ''; if (isUrl(c.split('\n')[0])) text = c; } catch {}
   }
   $('#add-urls').value = text;
+  $('#add-checksum').value = '';
   $('#add-video').checked = text.split('\n').some(looksLikeVideo);
   fillQuality();
   syncQualityField();
@@ -238,15 +288,30 @@ function fillQuality() {
   sel.innerHTML = '';
   for (const q of ['default', 'best', '2160', '1440', '1080', '720', '480', 'audio']) sel.append(new Option(t('q.' + q), q));
 }
-const syncQualityField = () => { $('#add-quality-field').hidden = !$('#add-video').checked; };
+// Özet yalnızca tek bir düz dosya için anlamlıdır (video birleştirilir/dönüştürülür).
+const syncQualityField = () => {
+  const video = $('#add-video').checked;
+  $('#add-quality-field').hidden = !video;
+  $('#add-checksum-field').hidden = video || $('#add-urls').value.split('\n').filter((s) => isUrl(s)).length > 1;
+};
 $('#add-urls').addEventListener('input', () => { $('#add-video').checked = $('#add-urls').value.split('\n').some(looksLikeVideo); syncQualityField(); });
 $('#add-video').addEventListener('change', syncQualityField);
 $('#add-cancel').onclick = () => $('#dlg-add').close();
-$('#form-add').addEventListener('submit', async () => {
+const CHECKSUM_RE = /^(?:(md5|sha-?1|sha-?256|sha-?512)\s*:\s*)?([a-f0-9]{32}|[a-f0-9]{40}|[a-f0-9]{64}|[a-f0-9]{128})$/i;
+$('#form-add').addEventListener('submit', async (e) => {
   const urls = $('#add-urls').value.split('\n').map((s) => s.trim()).filter(isUrl);
   if (!urls.length) return;
+  const typed = $('#add-checksum').value.trim();
+  if (typed && !$('#add-checksum-field').hidden && !CHECKSUM_RE.test(typed)) {
+    e.preventDefault(); // pencere açık kalsın, düzeltilebilsin
+    toast(t('ck.invalid'), 'bad');
+    $('#add-checksum').focus();
+    return;
+  }
   const q = $('#add-quality').value;
-  try { await api.add(urls, $('#add-video').checked, $('#add-video').checked && q !== 'default' ? q : null); toast(t('toast.added'), 'ok'); } catch (e) { toast(`${t('toast.error')}: ${e}`, 'bad'); }
+  const video = $('#add-video').checked;
+  const ck = !video && urls.length === 1 ? $('#add-checksum').value.trim() : '';
+  try { await api.add(urls, video, video && q !== 'default' ? q : null, ck || null); toast(t('toast.added'), 'ok'); } catch (e) { toastError(e); }
 });
 
 // ---------- Ayarlar ----------
@@ -280,6 +345,9 @@ async function openSettings() {
   body.append(checkbox('s-notif', t('settings.notifications'), s.notifications));
   body.append(checkbox('s-tray', t('settings.tray'), s.close_to_tray));
   body.append(checkbox('s-auto', t('settings.autostart'), s.autostart));
+  const wiz = el('button', null, esc(t('settings.wizard'))); wiz.type = 'button'; wiz.style.marginTop = '10px';
+  wiz.onclick = () => { $('#dlg-settings').close(); openWizard(); };
+  body.append(wiz);
 
   body.append(el('h4', null, esc(t('settings.downloads'))));
   const range = (id, min, max, val) => el('div', 'range', `<input type="range" id="${id}" min="${min}" max="${max}" value="${val}"><output>${val}</output>`);
@@ -292,6 +360,9 @@ async function openSettings() {
   body.append(settingsField(t('settings.speed'), speed));
   const cap = el('textarea'); cap.rows = 3; cap.value = s.capture_extensions.join(' ');
   body.append(settingsField(t('settings.capture'), cap, t('settings.captureHint')));
+  const http = el('select');
+  [['auto', t('settings.httpAuto')], ['http1', t('settings.http1')], ['http2', t('settings.http2')]].forEach(([v, n]) => http.append(new Option(n, v, false, (s.http_version || 'auto') === v)));
+  body.append(settingsField(t('settings.http'), http, t('settings.httpHint')));
   const port = el('input'); port.type = 'number'; port.min = 1024; port.max = 65535; port.value = s.port;
   body.append(settingsField(t('settings.port'), port, t('settings.portHint')));
 
@@ -325,7 +396,7 @@ async function openSettings() {
       close_to_tray: $('#s-tray').checked, autostart: $('#s-auto').checked,
       max_connections: Number($('#s-conn').value), max_concurrent: Number($('#s-conc').value),
       speed_limit_kbps: Math.max(0, Number(speed.value) || 0), port: Number(port.value) || s.port,
-      capture_extensions: cap.value.split(/[\s,]+/).filter(Boolean), video_quality: q.value,
+      capture_extensions: cap.value.split(/[\s,]+/).filter(Boolean), video_quality: q.value, http_version: http.value,
     };
     try { settings = await api.setSettings(next); applyLanguage(); $('#dlg-settings').close(); } catch (e) { toast(`${t('toast.error')}: ${e}`, 'bad'); }
   };
@@ -454,6 +525,147 @@ async function refreshBrowserDot() {
   $('#browser-dot').classList.toggle('on', any);
 }
 
+// ---------- İndirmeler bitince ----------
+const AFTER = [['none', 'x'], ['sleep', 'moon'], ['shutdown', 'power'], ['quit', 'logout']];
+let afterAction = 'none';
+let countdownTimer = null;
+
+function renderAfter() {
+  const btn = $('#btn-after');
+  btn.classList.toggle('armed', afterAction !== 'none');
+  const label = $('#after-label');
+  label.hidden = afterAction === 'none';
+  label.textContent = afterAction === 'none' ? '' : t('after.on.' + afterAction);
+  btn.title = afterAction === 'none' ? t('after.title') : t('after.set', { a: t('after.' + afterAction) });
+  const menu = $('#after-menu');
+  menu.innerHTML = '';
+  menu.append(el('div', 'menu-head', esc(t('after.title'))));
+  for (const [a, ic] of AFTER) {
+    const b = el('button', 'menu-item' + (afterAction === a ? ' on' : ''), `${icon(ic, 16)}<span>${esc(t('after.' + a))}</span>${afterAction === a ? `<span class="tick">${icon('check', 16)}</span>` : ''}`);
+    b.onclick = async () => { menu.hidden = true; try { afterAction = await api.setAfterAll(a); renderAfter(); } catch (e) { toastError(e); } };
+    menu.append(b);
+  }
+  menu.append(el('div', 'menu-hint', esc(t('after.hint'))));
+}
+
+function showCountdown({ action, seconds }) {
+  const dlg = $('#dlg-after');
+  let left = seconds;
+  const paint = () => { $('#after-count').textContent = t('after.count.' + action, { n: left }); };
+  paint();
+  clearInterval(countdownTimer);
+  countdownTimer = setInterval(() => { left -= 1; if (left <= 0) { clearInterval(countdownTimer); dlg.close(); } else paint(); }, 1000);
+  if (!dlg.open) dlg.showModal();
+}
+
+// ---------- İlk açılış sihirbazı ----------
+const WIZ_STEPS = 4;
+let wizStep = 0;
+let wizTimer = null;
+let wizDraft = null;
+
+async function openWizard() {
+  wizStep = 0;
+  wizDraft = { ...(await api.getSettings()) };
+  renderWizard();
+  if (!$('#dlg-wizard').open) $('#dlg-wizard').showModal();
+}
+
+async function finishWizard() {
+  clearInterval(wizTimer);
+  try { settings = await api.setSettings({ ...(await api.getSettings()), download_dir: wizDraft.download_dir, categorize: wizDraft.categorize, onboarded: true }); } catch (e) { toastError(e); }
+  $('#dlg-wizard').close();
+}
+
+let wizRender = 0;
+async function renderWizard() {
+  clearInterval(wizTimer);
+  const token = ++wizRender; // eşzamansız çizimler çakışmasın: yalnızca en son çizim tamamlanır
+  const body = $('#wizard-body');
+  body.innerHTML = '';
+  const head = el('div', 'wiz-head', `<img src="/src/logo.png" width="40" height="40" alt=""><div><h3>${esc(t('wiz.title'))}</h3><div class="motto">${esc(t('motto'))}</div></div>`);
+  const dots = el('div', 'wiz-dots');
+  for (let i = 0; i < WIZ_STEPS; i++) dots.append(el('i', i === wizStep ? 'on' : i < wizStep ? 'done' : ''));
+  body.append(head, dots);
+  const page = el('div', 'wiz-page');
+  body.append(page);
+
+  if (wizStep === 0) {
+    page.append(el('h4', null, esc(t('wiz.s1.title'))), el('p', 'hint', esc(t('wiz.s1.text'))));
+    const dirIn = el('input'); dirIn.type = 'text'; dirIn.value = wizDraft.download_dir;
+    dirIn.oninput = () => { wizDraft.download_dir = dirIn.value.trim() || wizDraft.download_dir; };
+    const pick = el('button', null, esc(t('settings.choose'))); pick.type = 'button';
+    pick.onclick = async () => { const p = await api.pickFolder(); if (p) { dirIn.value = p; wizDraft.download_dir = p; } };
+    const pair = el('div', 'pair'); pair.append(dirIn, pick);
+    page.append(pair);
+    const cat = checkbox('wz-cat', t('settings.categorize'), wizDraft.categorize);
+    cat.querySelector('input').onchange = (e) => { wizDraft.categorize = e.target.checked; };
+    page.append(cat);
+  } else if (wizStep === 1) {
+    page.append(el('h4', null, esc(t('wiz.s2.title'))), el('p', 'hint', esc(t('wiz.s2.text'))));
+    const ol = el('ol', 'wiz-list');
+    for (const k of ['wiz.s2.l1', 'wiz.s2.l2', 'wiz.s2.l3']) ol.append(el('li', null, esc(t(k))));
+    page.append(ol);
+    status = await api.status();
+    if (token !== wizRender) return;
+    page.append(el('div', 'path', esc(status.extension_path || '—')));
+    const row = el('div', 'buttons left');
+    const open = el('button', 'primary', `${icon('open', 16)}<span>${esc(t('wiz.s2.open'))}</span>`); open.type = 'button';
+    const note = el('p', 'hint');
+    open.onclick = async () => {
+      try { await api.copyText(status.extension_path || ''); } catch {}
+      try { const b = await api.openExtensionsPage(); note.textContent = t('wiz.s2.opened', { b }); }
+      catch { note.textContent = t('wiz.s2.noBrowser'); }
+    };
+    const folder = el('button', null, `${icon('folder', 16)}<span>${esc(t('wiz.s2.folder'))}</span>`); folder.type = 'button';
+    folder.onclick = () => api.openExtensionFolder().catch(toastError);
+    const copy = el('button', null, `${icon('copy', 16)}<span>${esc(t('browser.copy'))}</span>`); copy.type = 'button';
+    copy.onclick = () => { api.copyText(status.extension_path || ''); toast(t('ck.copied'), 'ok'); };
+    row.append(open, folder, copy);
+    page.append(row, note);
+    const live = el('div', 'wiz-live');
+    const paint = () => {
+      const on = Object.values(status.extensions_seen || {}).some(connected);
+      live.className = 'wiz-live' + (on ? ' ok' : '');
+      live.innerHTML = on ? `${icon('check', 16)}<span>${esc(t('wiz.s2.ok'))}</span>` : `<span class="spinner"></span><span>${esc(t('wiz.s2.waiting'))}</span>`;
+    };
+    paint();
+    page.append(live, el('p', 'hint', esc(t('wiz.s2.firefox'))));
+    wizTimer = setInterval(async () => { try { status = await api.status(); paint(); } catch {} }, 2000);
+  } else if (wizStep === 2) {
+    page.append(el('h4', null, esc(t('wiz.s3.title'))), el('p', 'hint', esc(t('wiz.s3.text'))));
+    status = await api.status();
+    if (token !== wizRender) return;
+    const line = el('div', 'field inline');
+    line.append(el('span', 'badge ' + (status.ytdlp ? 'ok' : 'bad'), `${icon(status.ytdlp ? 'check' : 'alert', 14)} ${esc(t('settings.ytdlp'))}: ${esc(status.ytdlp ? t('settings.ytdlpOk') : t('settings.ytdlpMissing'))}`));
+    if (!status.ytdlp) {
+      const inst = el('button', 'primary', esc(t('settings.ytdlpInstall'))); inst.type = 'button';
+      inst.onclick = async () => {
+        inst.disabled = true; inst.textContent = t('settings.installing');
+        try { await api.installYtdlp(); toast(t('toast.ytdlpInstalled'), 'ok'); renderWizard(); }
+        catch (e) { toastError(e); inst.disabled = false; inst.textContent = t('settings.ytdlpInstall'); }
+      };
+      line.append(inst);
+    }
+    page.append(line);
+  } else {
+    page.append(el('h4', null, esc(t('wiz.s4.title'))));
+    const ul = el('ul', 'wiz-tips');
+    for (const [k, ic] of [['wiz.s4.l1', 'bolt'], ['wiz.s4.l2', 'video'], ['wiz.s4.l3', 'link'], ['wiz.s4.l4', 'shield']]) ul.append(el('li', null, `${icon(ic, 16)}<span>${esc(t(k))}</span>`));
+    page.append(ul);
+  }
+
+  const nav = el('div', 'buttons wiz-nav');
+  const step = el('span', 'wiz-step', esc(t('wiz.step', { i: wizStep + 1, n: WIZ_STEPS })));
+  nav.append(step);
+  if (wizStep > 0) { const b = el('button', null, esc(t('wiz.back'))); b.type = 'button'; b.onclick = () => { wizStep--; renderWizard(); }; nav.append(b); }
+  else { const b = el('button', null, esc(t('wiz.skip'))); b.type = 'button'; b.onclick = finishWizard; nav.append(b); }
+  const next = el('button', 'primary', esc(wizStep === WIZ_STEPS - 1 ? t('wiz.finish') : t('wiz.next'))); next.type = 'button';
+  next.onclick = () => { if (wizStep === WIZ_STEPS - 1) finishWizard(); else { wizStep++; renderWizard(); } };
+  nav.append(next);
+  body.append(nav);
+}
+
 // ---------- Başlangıç ----------
 async function syncLanguage() {
   try { status = await api.status(); setLanguage(status.language); } catch { setLanguage('tr'); }
@@ -466,6 +678,8 @@ async function applyLanguage() {
   renderNav();
   for (const d of downloads.values()) updateRow(d);
   renderList();
+  renderAfter();
+  if ($('#dlg-wizard').open) renderWizard();
 }
 
 async function main() {
@@ -488,6 +702,17 @@ async function main() {
   await api.on('settings-changed', (s) => { settings = s; applyLanguage(); });
   await api.on('clipboard-url', (url) => toast(`${t('toast.clipboard')}`, '', { label: t('add'), fn: () => openAddDialog(url) }));
   await api.on('open-add-dialog', () => openAddDialog());
+  await api.on('after-all-changed', (a) => { afterAction = a || 'none'; renderAfter(); });
+  await api.on('after-all-countdown', showCountdown);
+  await api.on('after-all-failed', () => toast(t('after.failed'), 'bad'));
+  try { afterAction = await api.getAfterAll(); } catch {}
+  renderAfter();
+  $('#btn-after').onclick = (e) => { e.stopPropagation(); $('#after-menu').hidden = !$('#after-menu').hidden; };
+  document.addEventListener('click', (e) => { if (!e.target.closest('.after-wrap')) $('#after-menu').hidden = true; });
+  $('#after-cancel').onclick = () => { clearInterval(countdownTimer); $('#dlg-after').close(); api.answerAfterAll(false); };
+  $('#after-now').onclick = () => { clearInterval(countdownTimer); $('#dlg-after').close(); api.answerAfterAll(true); };
+  $('#dlg-after').addEventListener('cancel', (e) => { e.preventDefault(); $('#after-cancel').click(); });
+  $('#dlg-wizard').addEventListener('close', () => clearInterval(wizTimer));
 
   $('#btn-add').onclick = () => openAddDialog();
   $('#btn-settings').onclick = openSettings;
@@ -508,7 +733,9 @@ async function main() {
     const text = e.dataTransfer?.getData('text/uri-list') || e.dataTransfer?.getData('text/plain') || '';
     if (isUrl(text.split('\n')[0])) openAddDialog(text.trim());
   });
-  document.querySelectorAll('dialog').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
+  // Arka plana tıklayınca kapanır (geri sayım ve sihirbaz hariç: yanlışlıkla kapanmasın).
+  document.querySelectorAll('dialog:not(#dlg-after):not(#dlg-wizard)').forEach((d) => d.addEventListener('click', (e) => { if (e.target === d) d.close(); }));
+  if (settings && settings.onboarded === false) openWizard();
 
   refreshBrowserDot();
   setInterval(refreshBrowserDot, 5000);

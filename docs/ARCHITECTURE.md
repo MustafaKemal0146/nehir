@@ -79,7 +79,9 @@ yt-dlp süreci ayrı bir süreç grubunda çalıştırılır; çıkışı doğru
 - **İnceleme (salt okunur):** `/proc/sys/net/...` ve `/sys/class/net/...` okunur; her ayar için "şu an / önerilen / yeterli mi" hesaplanır. Arayüzler (Wi-Fi/Ethernet/VPN), sürücü adı, MTU ve varsayılan rotanın hangi arayüzden geçtiği (`/proc/net/route`) bulunur.
 - **Uygulama:** Yalnızca kullanıcı onayıyla, `pkexec /usr/lib/nehir/nehir-nettune apply|revert tcp [wifi]` çağrılır. Yardımcı betik argümanı komut olarak çalıştırmaz; yalnızca `tcp` ve `wifi` kabul eder, sabit ayarları yazar ve özgün değerleri `/var/lib/nehir/nettune-backup.conf` dosyasına yedekler. polkit eylemi: `org.nehir.nettune`.
 - **Test:** Yardımcı, sahte bir kök dizin ve sahte `sysctl` ile sınanır (`tests/nettune_helper.rs`); gerçek sistem ayarlarına dokunulmaz.
-- **HTTP istemcisi:** yalnızca HTTP/1.1. HTTP/2 tüm `Range` isteklerini tek TCP bağlantısında çoğullayacağı için çok bağlantılı indirmenin faydasını ortadan kaldırırdı.
+- **HTTP istemcisi:** varsayılan olarak HTTP/1.1. HTTP/2 tüm `Range` isteklerini tek TCP bağlantısında çoğullayacağı için çok bağlantılı indirmenin faydasını azaltır. Ancak sunucu bağlantı sayısını sınırlıyorsa (429/503) motor, işçi sayısını düşürmeden önce ikinci bir istemciyle HTTP/2'ye geçer (ALPN ile anlaşılır; sunucu desteklemiyorsa HTTP/1.1 kalır). Ayarlarda "Yalnızca HTTP/1.1" ve "HTTP/2" de seçilebilir.
+- **Disk:** parça planı varsa dosya `fallocate` ile baştan ayrılır; probe sonrası `statvfs` ile boş yer denetlenir (`disk_full:<gereken>:<boş>` hatası).
+- **Doğrulama** (`checksum.rs`): MD5 / SHA-1 / SHA-256 / SHA-512; beklenen özet varsa dosya tamamlanınca `Processing` + `stage=verifying` aşamasında hesaplanır. Eklenti özeti sayfadan ya da `SHA256SUMS` bağlantısından bulur.
 
 ## Veri konumları
 

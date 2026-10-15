@@ -32,6 +32,10 @@ pub struct Settings {
     /// Alan eksikse 0 sayılır (struct varsayılanı değil), böylece eski dosyalar taşınır.
     #[serde(default = "zero")]
     pub list_version: u32,
+    /// "auto": HTTP/1.1 ile çok bağlantı, sunucu sınırlarsa HTTP/2'ye geç · "http1" · "http2".
+    pub http_version: String,
+    /// İlk açılış sihirbazı tamamlandı mı?
+    pub onboarded: bool,
 }
 
 impl Default for Settings {
@@ -52,6 +56,8 @@ impl Default for Settings {
             close_to_tray: true,
             autostart: false,
             list_version: 2,
+            http_version: "auto".into(),
+            onboarded: false,
         }
     }
 }
@@ -97,6 +103,9 @@ impl Settings {
                 self.capture_extensions.push(e.to_string());
             }
             self.list_version = 2;
+        }
+        if !matches!(self.http_version.as_str(), "http1" | "http2") {
+            self.http_version = "auto".into();
         }
         if !matches!(self.language.as_str(), "tr" | "en") {
             self.language = "auto".into();

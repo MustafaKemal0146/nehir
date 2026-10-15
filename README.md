@@ -33,7 +33,10 @@ Linux'ta Windows'taki IDM gibi, **tarayıcıya girip indirmeyi kendisi devralan*
 | | |
 |---|---|
 | ⚡ **Çok bağlantılı indirme** | Dosyayı 1–32 parçaya bölüp paralel indirir. Boşta kalan bağlantı, en büyük kalan parçayı bölüp yarısını devralır, bu yüzden bitişe doğru yavaşlamaz. |
-| ⏯️ **Duraklat ve devam et** | Uygulamayı kapatsan, bilgisayarı yeniden başlatsan bile kaldığı yerden sürer. |
+| ⏯️ **Duraklat ve devam et** | Uygulamayı kapatsan, bilgisayarı yeniden başlatsan bile kaldığı yerden, kendiliğinden sürer. |
+| 🛡️ **Dosya doğrulama** | Sitede SHA-256 (ya da SHA-512, SHA-1, MD5) yazıyorsa eklenti onu sayfadan ya da `SHA256SUMS` dosyasından bulur; indirme bitince dosya otomatik doğrulanır. Elle de yapıştırılabilir. |
+| 🔀 **Akıllı protokol** | Dosya çok bağlantılı HTTP/1.1 ile iner; sunucu bağlantı sayısını sınırlarsa Nehir HTTP/2'ye geçer ve parçalar tek bağlantıda sürer. |
+| 💾 **Disk ön ayırma** | Dosyanın yeri baştan ayrılır (`fallocate`): parçalanma azalır, yer yetmezse indirme saatler sonra değil, en başta söylenir. |
 | 🌐 **Ağ kopmasına dayanıklı** | Bağlantı gidince indirme "Ağ bekleniyor" durumuna geçer; ağ geri gelince ya da bilgisayar uykudan uyanınca kendiliğinden devam eder. |
 | 🧩 **Tarayıcı eklentisi** | Chrome, Brave, Edge, Chromium, Vivaldi, Opera ve Firefox için tek eklenti. Tarayıcı indirmelerini yakalar, çerezleri ve `Referer`'i da taşır (giriş gerektiren siteler çalışır). |
 | 🎬 **Her videoyu indir** | `yt-dlp` ile YouTube, Vimeo, X, Instagram, TikTok, Twitch, Dailymotion ve 1000'den fazla site. HLS (`.m3u8`) ve DASH (`.mpd`) akışları dahil. |
@@ -41,7 +44,9 @@ Linux'ta Windows'taki IDM gibi, **tarayıcıya girip indirmeyi kendisi devralan*
 | 🎵 **MP3 olarak indir** | Aynı menüden tek tıkla müzik. `Müzik/` klasörüne düşer. |
 | 🗂️ **Otomatik düzen** | Dosyalar türüne göre `Videolar`, `Müzik`, `Belgeler`, `Sıkıştırılmış`, `Programlar`, `Resimler` klasörlerine yerleşir. Yarım dosyalar gizli klasörde tutulur, indirme klasörün kirlenmez. |
 | 🚦 **Kuyruk ve hız sınırı** | Aynı anda kaç indirme çalışacağını ve toplam hızı sen belirlersin. |
-| 🔔 **Tepsi, pano, bildirim** | Sistem tepsisinde yaşar. Panoya indirilebilir bir bağlantı kopyalayınca haber verir. |
+| 🔔 **Tepsi, pano, bildirim** | Sistem tepsisinde yaşar. Panoya indirilebilir bir bağlantı kopyalayınca haber verir. Bildirimlerde **Aç**, **Klasörü göster** ve **Tekrar dene** düğmeleri vardır. |
+| 🌙 **Bitince ne olsun?** | İndirmeler bitince bilgisayarı uyut, kapat ya da Nehir'den çık. Önce 60 saniyelik, iptal edilebilir bir geri sayım çıkar. |
+| 🧭 **Kurulum sihirbazı** | İlk açılışta indirme klasörü, tarayıcı eklentisi (eklentiler sayfasını kendisi açar, bağlanınca haber verir) ve `yt-dlp` adım adım kurulur. |
 | 🌍 **Türkçe ve İngilizce** | Dil bilgisayarının diline göre otomatik seçilir. |
 | 🛜 **Ağ optimizasyonu** | TCP/IP (BBR, tamponlar) ve Wi-Fi sürücüsü ayarlarını inceler; onayınla uygular, tek tıkla geri alır. [Ayrıntı](#-ağ-optimizasyonu) |
 | 🔒 **Güvenli köprü** | Eklenti ile uygulama arasındaki yerel köprüye yalnızca tarayıcı eklentileri erişebilir. [Ayrıntı](#-güvenlik) |
@@ -68,7 +73,7 @@ Linux'ta Windows'taki IDM gibi, **tarayıcıya girip indirmeyi kendisi devralan*
 [**Releases**](https://github.com/MustafaKemal0146/nehir/releases/latest) sayfasından `.deb` dosyasını indir:
 
 ```bash
-sudo apt install ./nehir_1.0.0_amd64.deb
+sudo apt install ./nehir_1.1.0_amd64.deb
 ```
 
 Menüden **Nehir**'i aç. (Gerekli kütüphaneler `apt` tarafından otomatik kurulur.)
@@ -100,6 +105,8 @@ Nehir'i aç → **Ayarlar → Video → yt-dlp'yi kur**. Tek tıkla, kullanıcı
 - **Sağ tık:** Bir bağlantıya sağ tıkla → *Nehir ile indir*. Sayfada boş bir yere sağ tıkla → *Sayfadaki videoyu indir / MP3 olarak indir*.
 - **Elle ekle:** Uygulamada **Ekle** (veya `Ctrl+N`), adresi yapıştır. Bir bağlantıyı pencereye sürükleyip bırakmak da çalışır.
 - **Eklenti penceresi:** Araç çubuğundaki Nehir simgesi sayfadaki medyayı ve indirmelerin ilerlemesini gösterir.
+- **Dosya doğrulama:** Bir indirmeye tıklayınca açılan ayrıntılarda sonuç ve hesaplanan özet görünür; beklenen özeti yapıştırıp **Doğrula** diyebilirsin.
+- **Bitince:** Üst çubuktaki güç düğmesinden *Bilgisayarı uyut / kapat / Nehir'den çık* seçilir; bir kez uygulanır.
 
 ## 🛜 Ağ optimizasyonu
 
@@ -123,7 +130,7 @@ Nehir'i aç → **Ayarlar → Video → yt-dlp'yi kur**. Tek tıkla, kullanıcı
   çerez + Referer ekler)    (yalnızca eklenti)   yt-dlp · ffmpeg · kalıcı kayıt
 ```
 
-- **Motor** (`nehir-core`): HTTP `Range` ile parçalı indirme, ağ hatalarına karşı yeniden deneme ve geri çekilme (429/503), Range desteği yoksa tek akışa düşme, parça durumunu diske yazarak devam etme.
+- **Motor** (`nehir-core`): HTTP `Range` ile parçalı indirme, ağ hatalarına karşı yeniden deneme ve geri çekilme (429/503), sunucu bağlantıları sınırlarsa HTTP/2'ye geçiş, Range desteği yoksa tek akışa düşme, `fallocate` ile yer ayırma, parça durumunu diske yazarak devam etme, bitince özet doğrulama.
 - **Köprü:** Eklenti, `127.0.0.1` üzerinde küçük bir HTTP API'siyle uygulamaya indirme gönderir.
 - **Native host** (`nehir-host`): Uygulama kapalıyken tarayıcının onu başlatabilmesi için. Üzerinden URL ya da çerez geçmez.
 - **Ağ ayarları** (`nettune`): sistemi salt okunur inceler; yazma işini yalnızca kullanıcı onayıyla, küçük bir yetkili yardımcı yapar.
@@ -168,7 +175,10 @@ Arayüzü uygulamayı derlemeden denemek için `cd ui && npm run dev`: Tauri dı
 - [ ] Flatpak (Flathub) ve AppImage paketleri
 - [ ] Chrome Web Store ve Firefox AMO yayını
 - [x] Ağ optimizasyonu (TCP/IP + Wi-Fi)
-- [ ] Zamanlayıcı ("gece 02:00'de başla, bitince bilgisayarı kapat")
+- [x] İndirmeler bitince uyut / kapat
+- [x] Dosya bütünlüğü doğrulama (SHA-256, SHA-512, SHA-1, MD5)
+- [x] İlk açılış sihirbazı
+- [ ] Zamanlayıcı ("gece 02:00'de başla")
 - [ ] Oynatma listesi ve kanal indirme
 - [ ] Altyazı, kapak resmi ve MP3 etiketleri
 - [ ] İndirme geçmişi ve arama

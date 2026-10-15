@@ -1,5 +1,6 @@
 //! İndirme yöneticisi: kuyruk, eşzamanlılık, duraklat/devam, kalıcılık ve olay yayını.
 
+use crate::checksum;
 use crate::engine::{self, Config, EngineError, Outcome, Progress, SpeedLimit};
 use crate::model::*;
 use crate::settings::{write_atomic, Paths, Settings};
@@ -101,6 +102,8 @@ struct Inner {
     settings: RwLock<Settings>,
     limiter: Arc<SpeedLimit>,
     client: reqwest::Client,
+    /// HTTP/2 konuşabilen istemci ("http2" ayarında ya da sunucu bağlantı sayısını sınırladığında).
+    client_h2: reqwest::Client,
     paths: Paths,
     last_save: Mutex<Instant>,
     extensions_seen: Mutex<HashMap<String, u64>>,
@@ -149,6 +152,7 @@ impl Manager {
             settings: RwLock::new(settings),
             limiter,
             client: engine::build_client().expect("http istemcisi"),
+            client_h2: engine::build_client_h2().expect("http/2 istemcisi"),
             paths,
             last_save: Mutex::new(Instant::now()),
             extensions_seen: Mutex::new(HashMap::new()),
@@ -293,6 +297,11 @@ impl Manager {
             retries: 0,
             retry_at: None,
             retry_mark: 0,
+            protocol: None,
+            // Video dönüştürüldüğü (birleştirme, MP3) için özet yalnızca düz dosyalarda anlamlıdır.
+            checksum_expected: req.checksum.as_deref().filter(|_| req.kind == Kind::File).and_then(checksum::normalize),
+            checksum_actual: None,
+            checksum_ok: None,
         };
         let out = public(&d);
         self.inner.items.lock().unwrap().insert(0, d);
@@ -364,6 +373,42 @@ impl Manager {
         }
         self.remove_now(id, delete_file);
         self.schedule();
+    }
+
+    /// Tamamlanmış dosyanın özetini hesaplar; `expected` verilirse (ya da indirmede beklenen varsa) karşılaştırır.
+    /// Sonuç `checksum_actual` / `checksum_ok` alanlarında, olay olarak gelir.
+    pub fn verify(&self, id: Uuid, expected: Option<String>) -> Result<(), String> {
+        let expected = match expected.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+            Some(e) => Some(checksum::normalize(e).ok_or("invalid_checksum")?),
+            None => None,
+        };
+        let d = self.get_full(id).ok_or("kayıt bulunamadı")?;
+        if d.state != State::Completed || d.stage.as_deref() == Some("verifying") {
+            return Err("not_ready".into());
+        }
+        let expected = expected.or(d.checksum_expected.clone());
+        let shown = expected.clone();
+        self.update(id, move |it| {
+            it.stage = Some("verifying".into());
+            it.checksum_expected = shown;
+            it.checksum_ok = None;
+        });
+        let m = self.clone();
+        let path = d.final_path();
+        self.inner.rt.spawn(async move {
+            let (actual, ok) = hash_and_compare(path, expected).await;
+            let failed = actual.is_none();
+            m.update(id, |it| {
+                it.stage = None;
+                it.checksum_actual = actual;
+                it.checksum_ok = ok;
+                if failed {
+                    it.error = Some("checksum_read_failed".into());
+                }
+            });
+            m.save_now();
+        });
+        Ok(())
     }
 
     pub fn clear_finished(&self) {
@@ -505,7 +550,12 @@ impl Manager {
         let id = d.id;
         let headers = Self::headers_for(&d);
         let settings = self.settings();
-        let client = self.inner.client.clone();
+        // "auto": HTTP/1.1 ile çok bağlantı; sunucu sınırlarsa motor HTTP/2 istemcisine geçer.
+        let (client, fallback_client) = match settings.http_version.as_str() {
+            "http2" => (self.inner.client_h2.clone(), None),
+            "http1" => (self.inner.client.clone(), None),
+            _ => (self.inner.client.clone(), Some(self.inner.client_h2.clone())),
+        };
 
         let can_resume = d.total_bytes > 0 && !d.segments.is_empty() && d.part_path().exists() && !d.file_name.is_empty();
         let (segments, total, resume) = if can_resume {
@@ -544,6 +594,12 @@ impl Manager {
                 dir = dir.join(category.folder_name());
             }
             tokio::fs::create_dir_all(&dir).await.map_err(|e| format!("klasör oluşturulamadı: {e}"))?;
+            // Yer yetmeyecekse indirmeye hiç başlama (saatler sonra yarıda kalmasın).
+            if let (Some(total), Some(free)) = (info.total, engine::free_space(&dir)) {
+                if total > free {
+                    return Err(Fail::from_engine(engine::disk_full_error(total, free)));
+                }
+            }
             let name = util::unique_file_name(&dir, &name);
             // Aynı anda gelen başka bir indirme aynı adı almasın.
             let work = dir.join(WORK_DIR_NAME);
@@ -584,6 +640,7 @@ impl Manager {
             limiter: self.inner.limiter.clone(),
             max_attempts: self.tuning().max_attempts,
             backoff_scale: self.tuning().backoff_scale,
+            fallback_client,
         };
         let m = self.clone();
         let outcome = engine::run(cfg, client, cancel, move |p| m.on_progress(id, p)).await;
@@ -596,6 +653,18 @@ impl Manager {
                 }
                 tokio::fs::rename(d.part_path(), &target).await.map_err(|e| format!("dosya taşınamadı: {e}"))?;
                 let _ = std::fs::remove_dir(d.work_dir());
+                if let Some(expected) = d.checksum_expected.clone() {
+                    self.update(id, |it| {
+                        it.state = State::Processing;
+                        it.stage = Some("verifying".into());
+                        it.speed = 0.0;
+                    });
+                    let (actual, ok) = hash_and_compare(target.clone(), Some(expected)).await;
+                    self.update(id, |it| {
+                        it.checksum_actual = actual;
+                        it.checksum_ok = ok;
+                    });
+                }
                 Ok(Done::Completed(Some(target)))
             }
             Ok(Outcome::Stopped) => Ok(Done::Stopped),
@@ -623,6 +692,12 @@ impl Manager {
                 d.segments = p.segments;
             }
             d.speed = speed;
+            match p.protocol {
+                1 => d.protocol = Some("HTTP/1.1".into()),
+                2 => d.protocol = Some("HTTP/2".into()),
+                3 => d.protocol = Some("HTTP/3".into()),
+                _ => {}
+            }
         });
         self.save_if_due();
     }
@@ -893,6 +968,7 @@ impl Manager {
             // Müzik isteği (MP3'e çevirme) her zaman yt-dlp üzerinden yapılır.
             d.kind = if stream.is_match(&next) || d.audio_only() { Kind::Video } else { Kind::File };
             d.url = next;
+            d.checksum_expected = None; // özet sayfa adresindeki dosya içindi
             d.file_name.clear();
             d.state = State::Queued;
             d.error = None;
@@ -903,6 +979,19 @@ impl Manager {
             true
         })
         .unwrap_or(false)
+    }
+}
+
+/// Dosyanın özetini hesaplar (beklenen varsa onun algoritmasıyla, yoksa SHA-256) ve karşılaştırır.
+/// Dosya okunamazsa `(None, None)`.
+async fn hash_and_compare(path: PathBuf, expected: Option<String>) -> (Option<String>, Option<bool>) {
+    let algo = expected.as_deref().and_then(checksum::algo_of).unwrap_or(checksum::Algo::Sha256);
+    match tokio::task::spawn_blocking(move || checksum::hash_file(&path, algo)).await {
+        Ok(Ok(actual)) => {
+            let ok = expected.map(|e| e == actual);
+            (Some(actual), ok)
+        }
+        _ => (None, None),
     }
 }
 

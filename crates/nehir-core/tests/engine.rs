@@ -20,6 +20,8 @@ struct Srv {
     throttle_first: Arc<AtomicUsize>,
     delay_ms: u64,
     hits: Arc<AtomicUsize>,
+    /// Bu User-Agent ile gelen parça isteklerine her zaman 503 (bağlantı sayısını sınırlayan sunucu gibi).
+    block_ua: Option<&'static str>,
 }
 
 fn pattern(n: usize) -> Vec<u8> {
@@ -28,6 +30,10 @@ fn pattern(n: usize) -> Vec<u8> {
 
 async fn serve(State(s): State<Srv>, headers: HeaderMap) -> Response {
     s.hits.fetch_add(1, Ordering::SeqCst);
+    let ua = headers.get(header::USER_AGENT).and_then(|v| v.to_str().ok()).unwrap_or("");
+    if s.block_ua == Some(ua) && headers.contains_key(header::RANGE) && headers.get(header::RANGE).unwrap() != "bytes=0-0" {
+        return StatusCode::SERVICE_UNAVAILABLE.into_response();
+    }
     if s.throttle_first.load(Ordering::SeqCst) > 0 {
         s.throttle_first.fetch_sub(1, Ordering::SeqCst);
         return StatusCode::SERVICE_UNAVAILABLE.into_response();
@@ -85,6 +91,7 @@ fn srv(size: usize) -> Srv {
         throttle_first: Arc::new(AtomicUsize::new(0)),
         delay_ms: 0,
         hits: Arc::new(AtomicUsize::new(0)),
+        block_ua: None,
     }
 }
 
@@ -110,6 +117,7 @@ async fn download(url: &str, dir: &std::path::Path, conns: u32) -> (Outcome, std
             limiter: SpeedLimit::new(0),
             max_attempts: 12,
             backoff_scale: 1.0,
+            fallback_client: None,
         },
         client,
         CancellationToken::new(),
@@ -165,6 +173,7 @@ async fn server_that_lies_about_ranges_still_completes() {
             limiter: SpeedLimit::new(0),
             max_attempts: 12,
             backoff_scale: 1.0,
+            fallback_client: None,
         },
         client,
         CancellationToken::new(),
@@ -199,6 +208,7 @@ async fn recovers_from_503_throttling() {
             limiter: SpeedLimit::new(0),
             max_attempts: 12,
             backoff_scale: 1.0,
+            fallback_client: None,
         },
         client,
         CancellationToken::new(),
@@ -242,6 +252,7 @@ async fn pause_then_resume_produces_identical_file() {
             limiter: SpeedLimit::new(0),
             max_attempts: 12,
             backoff_scale: 1.0,
+            fallback_client: None,
         },
         client.clone(),
         cancel,
@@ -268,6 +279,7 @@ async fn pause_then_resume_produces_identical_file() {
             limiter: SpeedLimit::new(0),
             max_attempts: 12,
             backoff_scale: 1.0,
+            fallback_client: None,
         },
         client,
         CancellationToken::new(),
@@ -300,6 +312,7 @@ async fn speed_limit_is_respected() {
             limiter: SpeedLimit::new(500_000),
             max_attempts: 12,
             backoff_scale: 1.0, // 500 KB/s → ~2 sn
+            fallback_client: None,
         },
         client,
         CancellationToken::new(),
@@ -309,4 +322,85 @@ async fn speed_limit_is_respected() {
     .unwrap();
     assert_eq!(out, Outcome::Completed);
     assert!(t.elapsed() > Duration::from_millis(1400), "çok hızlı bitti: {:?}", t.elapsed());
+}
+
+#[tokio::test]
+async fn switches_to_fallback_client_when_server_limits_connections() {
+    let mut s = srv(2 * 1024 * 1024);
+    s.block_ua = Some("nehir-primary");
+    let url = start(s.clone()).await;
+    let primary = reqwest::Client::builder().http1_only().user_agent("nehir-primary").build().unwrap();
+    let fallback = reqwest::Client::builder().user_agent("nehir-fallback").build().unwrap();
+    let info = engine::probe(&primary, &url, &[]).await.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    let part = dir.path().join("h2.part");
+    let total = info.total.unwrap();
+    let out = engine::run(
+        Config {
+            url,
+            headers: vec![],
+            part_path: part.clone(),
+            max_connections: 6,
+            min_segment_size: 64 * 1024,
+            segments: engine::plan_segments(total, 6, 64 * 1024),
+            total: info.total,
+            resume: false,
+            limiter: SpeedLimit::new(0),
+            max_attempts: 3,
+            backoff_scale: 0.01,
+            fallback_client: Some(fallback),
+        },
+        primary,
+        CancellationToken::new(),
+        |_| {},
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, Outcome::Completed);
+    assert_eq!(std::fs::read(part).unwrap(), *s.data);
+}
+
+#[tokio::test]
+async fn file_space_is_reserved_up_front() {
+    let s = srv(3 * 1024 * 1024);
+    let url = start(s.clone()).await;
+    let client = build_client().unwrap();
+    let total = engine::probe(&client, &url, &[]).await.unwrap().total.unwrap();
+    let dir = tempfile::tempdir().unwrap();
+    assert!(engine::free_space(dir.path()).unwrap() > 0);
+    let part = dir.path().join("p.part");
+    let seen_len = Arc::new(Mutex::new(0u64));
+    let (sl, p2) = (seen_len.clone(), part.clone());
+    let out = engine::run(
+        Config {
+            url,
+            headers: vec![],
+            part_path: part.clone(),
+            max_connections: 4,
+            min_segment_size: 64 * 1024,
+            segments: engine::plan_segments(total, 4, 64 * 1024),
+            total: Some(total),
+            resume: false,
+            limiter: SpeedLimit::new(0),
+            max_attempts: 12,
+            backoff_scale: 1.0,
+            fallback_client: None,
+        },
+        client,
+        CancellationToken::new(),
+        // İlk ilerleme bildiriminde dosya zaten tam boyutunda olmalı.
+        move |_| {
+            let mut l = sl.lock().unwrap();
+            if *l == 0 {
+                *l = std::fs::metadata(&p2).map(|m| m.len()).unwrap_or(1);
+            }
+        },
+    )
+    .await
+    .unwrap();
+    assert_eq!(out, Outcome::Completed);
+    assert_eq!(*seen_len.lock().unwrap(), total);
+    // Blokları gerçekten ayrılmış (seyrek dosya değil).
+    use std::os::unix::fs::MetadataExt;
+    assert!(std::fs::metadata(&part).unwrap().blocks() * 512 >= total);
 }

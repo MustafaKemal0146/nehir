@@ -8,7 +8,7 @@ use nehir_core::{bridge, native, nettune, video};
 use serde_json::json;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
@@ -16,7 +16,6 @@ use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent}
 use tauri::{AppHandle, Emitter, Manager, State, WindowEvent};
 use tauri_plugin_clipboard_manager::ClipboardExt;
 use tauri_plugin_dialog::DialogExt;
-use tauri_plugin_notification::NotificationExt;
 use tokio_util::sync::CancellationToken;
 use uuid::Uuid;
 
@@ -24,7 +23,22 @@ struct AppState {
     downloads: Downloads,
     bridge: Mutex<Option<CancellationToken>>,
     listening: Arc<AtomicBool>,
+    after: Mutex<AfterAll>,
 }
+
+/// "İndirmeler bitince": uyku, kapatma ya da çıkış. Kalıcı değildir (uygulama yeniden açılınca kapalı başlar),
+/// böylece unutulmuş bir "kapat" ayarı bilgisayarı beklenmedik anda kapatmaz.
+#[derive(Default)]
+struct AfterAll {
+    action: String,
+    /// Kurulduktan sonra en az bir indirme tamamlandı mı? (Boş listeyle kurulunca hemen tetiklenmesin.)
+    completed_since: bool,
+    /// Geri sayım sürüyorsa: `true` gönderilirse hemen yap, `false` ise vazgeç.
+    countdown: Option<tokio::sync::oneshot::Sender<bool>>,
+}
+
+const AFTER_ACTIONS: &[&str] = &["none", "sleep", "shutdown", "quit"];
+const AFTER_COUNTDOWN_SECS: u64 = 60;
 
 type Res<T> = Result<T, String>;
 
@@ -36,10 +50,22 @@ fn list_downloads(state: State<AppState>) -> Vec<nehir_core::model::Download> {
 }
 
 #[tauri::command]
-fn add_downloads(state: State<AppState>, urls: Vec<String>, video: bool, quality: Option<String>) -> Res<()> {
+fn add_downloads(state: State<AppState>, urls: Vec<String>, video: bool, quality: Option<String>, checksum: Option<String>) -> Res<()> {
+    let checksum = match checksum.as_deref().map(str::trim).filter(|s| !s.is_empty()) {
+        Some(c) => Some(nehir_core::checksum::normalize(c).ok_or("invalid_checksum")?),
+        None => None,
+    };
+    let single = urls.len() == 1;
     let mut last_err = None;
     for url in urls {
-        let req = NewDownload { url, kind: if video { Kind::Video } else { Kind::File }, quality: quality.clone().filter(|_| video), ..Default::default() };
+        let req = NewDownload {
+            url,
+            kind: if video { Kind::Video } else { Kind::File },
+            quality: quality.clone().filter(|_| video),
+            // Özet tek bir dosyaya aittir; birden çok adreste kullanılmaz.
+            checksum: checksum.clone().filter(|_| single),
+            ..Default::default()
+        };
         if let Err(e) = state.downloads.add(req) {
             last_err = Some(e);
         }
@@ -82,6 +108,78 @@ fn resume_all(state: State<AppState>) {
 #[tauri::command]
 fn clear_finished(state: State<AppState>) {
     state.downloads.clear_finished();
+}
+#[tauri::command]
+fn verify_checksum(state: State<AppState>, id: String, expected: Option<String>) -> Res<()> {
+    state.downloads.verify(parse_id(&id)?, expected)
+}
+
+#[tauri::command]
+fn get_after_all(state: State<AppState>) -> String {
+    let a = state.after.lock().unwrap();
+    if a.action.is_empty() { "none".into() } else { a.action.clone() }
+}
+
+#[tauri::command]
+fn set_after_all(app: AppHandle, state: State<AppState>, action: String) -> Res<String> {
+    if !AFTER_ACTIONS.contains(&action.as_str()) {
+        return Err("geçersiz işlem".into());
+    }
+    {
+        let mut a = state.after.lock().unwrap();
+        if let Some(tx) = a.countdown.take() {
+            let _ = tx.send(false);
+        }
+        a.action = action.clone();
+        a.completed_since = false;
+    }
+    let _ = app.emit("after-all-changed", &action);
+    Ok(action)
+}
+
+/// Geri sayımı yanıtlar: `now` ise hemen uygular, değilse vazgeçer (işlem "hiçbir şey"e döner).
+#[tauri::command]
+fn answer_after_all(app: AppHandle, state: State<AppState>, now: bool) {
+    let tx = state.after.lock().unwrap().countdown.take();
+    if let Some(tx) = tx {
+        let _ = tx.send(now);
+    }
+    if !now {
+        state.after.lock().unwrap().action = "none".into();
+        let _ = app.emit("after-all-changed", "none");
+    }
+}
+
+/// Chromium tabanlı tarayıcıda eklentiler sayfasını açar (ilk kurulum sihirbazı için).
+#[tauri::command]
+fn open_extensions_page() -> Res<String> {
+    const BROWSERS: &[(&str, &str)] = &[
+        ("google-chrome", "Google Chrome"),
+        ("google-chrome-stable", "Google Chrome"),
+        ("brave-browser", "Brave"),
+        ("microsoft-edge", "Microsoft Edge"),
+        ("chromium", "Chromium"),
+        ("chromium-browser", "Chromium"),
+        ("vivaldi", "Vivaldi"),
+    ];
+    for (bin, name) in BROWSERS {
+        let ok = Command::new(bin)
+            .arg("chrome://extensions/")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .is_ok();
+        if ok {
+            return Ok(name.to_string());
+        }
+    }
+    Err("no_browser".into())
+}
+
+#[tauri::command]
+fn open_extension_folder() -> Res<()> {
+    xdg_open(&extension_dir().ok_or("eklenti klasörü bulunamadı")?)
 }
 
 #[tauri::command]
@@ -312,7 +410,7 @@ fn looks_capturable(url: &str, settings: &Settings) -> bool {
         return true;
     }
     let ext = u.path().rsplit_once('.').map(|(_, e)| e.to_ascii_lowercase()).unwrap_or_default();
-    !ext.is_empty() && settings.capture_extensions.iter().any(|e| *e == ext)
+    !ext.is_empty() && settings.capture_extensions.contains(&ext)
 }
 
 fn spawn_clipboard_watcher(app: AppHandle) {
@@ -344,7 +442,12 @@ fn spawn_event_forwarder(app: AppHandle) {
         loop {
             match rx.recv().await {
                 Ok(Event::Updated(d)) => {
+                    // Yalnızca durum değişimlerinde (ilerleme bildirimlerinde değil) "bitince" denetimi.
+                    let check = !matches!(d.state, nehir_core::model::State::Downloading | nehir_core::model::State::Probing | nehir_core::model::State::Processing);
                     let _ = app.emit("download-updated", d);
+                    if check {
+                        check_after_all(&app);
+                    }
                 }
                 Ok(Event::Removed(id)) => {
                     let _ = app.emit("download-removed", id);
@@ -355,33 +458,156 @@ fn spawn_event_forwarder(app: AppHandle) {
                 Ok(Event::Completed(d)) => {
                     let settings = app.state::<AppState>().downloads.settings();
                     if settings.notifications {
-                        let tr = is_turkish(&settings);
-                        let _ = app
-                            .notification()
-                            .builder()
-                            .title(if tr { "İndirme tamamlandı" } else { "Download completed" })
-                            .body(&d.file_name)
-                            .show();
+                        notify(&app, &d, true, is_turkish(&settings));
                     }
+                    app.state::<AppState>().after.lock().unwrap().completed_since = true;
                     let _ = app.emit("download-completed", d);
+                    check_after_all(&app);
                 }
                 Ok(Event::Failed(d)) => {
                     let settings = app.state::<AppState>().downloads.settings();
                     if settings.notifications {
-                        let tr = is_turkish(&settings);
-                        let _ = app
-                            .notification()
-                            .builder()
-                            .title(if tr { "İndirme başarısız" } else { "Download failed" })
-                            .body(&d.file_name)
-                            .show();
+                        notify(&app, &d, false, is_turkish(&settings));
                     }
+                    check_after_all(&app);
                 }
                 Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
                 Err(_) => break,
             }
         }
     });
+}
+
+// ---------- Bildirimler ----------
+
+/// Yanıtı (düğme tıklaması) beklenen bildirim sayısı. Her biri bir iş parçacığı tutar; sınırı aşınca düğmesiz gösterilir.
+static WAITING_NOTIFICATIONS: AtomicUsize = AtomicUsize::new(0);
+const MAX_WAITING_NOTIFICATIONS: usize = 8;
+
+/// Düğmeli masaüstü bildirimi: tamamlanınca "Aç" / "Klasörü göster", başarısız olunca "Tekrar dene".
+/// Bildirimin kendisine tıklamak Nehir'i öne getirir.
+fn notify(app: &AppHandle, d: &nehir_core::model::Download, completed: bool, tr: bool) {
+    let title = match (completed, tr) {
+        (true, true) => "İndirme tamamlandı",
+        (true, false) => "Download completed",
+        (false, true) => "İndirme başarısız",
+        (false, false) => "Download failed",
+    };
+    let mut body = d.file_name.clone();
+    if d.checksum_ok == Some(true) {
+        body.push_str(if tr { "\n✓ Dosya doğrulandı" } else { "\n✓ File verified" });
+    } else if d.checksum_ok == Some(false) {
+        body.push_str(if tr { "\n⚠ Doğrulama başarısız: dosya bozuk olabilir" } else { "\n⚠ Verification failed: the file may be corrupt" });
+    }
+    let mut n = notify_rust::Notification::new();
+    n.appname("Nehir").summary(title).body(&body).icon("nehir");
+    let with_actions = WAITING_NOTIFICATIONS.load(Ordering::SeqCst) < MAX_WAITING_NOTIFICATIONS;
+    if with_actions {
+        n.action("default", if tr { "Nehir'i aç" } else { "Open Nehir" });
+        if completed {
+            n.action("open", if tr { "Aç" } else { "Open" });
+            n.action("folder", if tr { "Klasörü göster" } else { "Show in folder" });
+        } else {
+            n.action("retry", if tr { "Tekrar dene" } else { "Retry" });
+        }
+    }
+    let handle = match n.show() {
+        Ok(h) => h,
+        Err(e) => {
+            tracing::warn!("bildirim gösterilemedi: {e}");
+            return;
+        }
+    };
+    if !with_actions {
+        return;
+    }
+    let app = app.clone();
+    let (id, path, dir) = (d.id, d.final_path(), d.dir.clone());
+    WAITING_NOTIFICATIONS.fetch_add(1, Ordering::SeqCst);
+    std::thread::spawn(move || {
+        handle.wait_for_action(|action| match action {
+            "open" => {
+                let _ = xdg_open(&path);
+            }
+            "folder" => {
+                let _ = xdg_open(&dir);
+            }
+            "retry" => app.state::<AppState>().downloads.resume(id),
+            "default" => {
+                let a = app.clone();
+                let _ = app.run_on_main_thread(move || show_main(&a));
+            }
+            _ => {}
+        });
+        WAITING_NOTIFICATIONS.fetch_sub(1, Ordering::SeqCst);
+    });
+}
+
+// ---------- İndirmeler bitince ----------
+
+/// Kuyrukta iş kalmadıysa ve bir işlem kuruluysa geri sayımı başlatır.
+fn check_after_all(app: &AppHandle) {
+    use nehir_core::model::State as S;
+    let state = app.state::<AppState>();
+    let action = {
+        let a = state.after.lock().unwrap();
+        if a.action.is_empty() || a.action == "none" || !a.completed_since || a.countdown.is_some() {
+            return;
+        }
+        a.action.clone()
+    };
+    let busy = state.downloads.list().iter().any(|d| matches!(d.state, S::Queued | S::Probing | S::Downloading | S::Processing | S::Waiting));
+    if busy {
+        return;
+    }
+    let (tx, rx) = tokio::sync::oneshot::channel::<bool>();
+    state.after.lock().unwrap().countdown = Some(tx);
+    let _ = app.emit("after-all-countdown", json!({ "action": action, "seconds": AFTER_COUNTDOWN_SECS }));
+    let a = app.clone();
+    let _ = app.run_on_main_thread(move || show_main(&a));
+    let app = app.clone();
+    tauri::async_runtime::spawn(async move {
+        let go = tokio::select! {
+            _ = tokio::time::sleep(Duration::from_secs(AFTER_COUNTDOWN_SECS)) => true,
+            r = rx => r.unwrap_or(false),
+        };
+        let state = app.state::<AppState>();
+        // Geri sayım sırasında yeni indirme eklendiyse şimdilik bekle (işlem kurulu kalır, sonra yeniden tetiklenir).
+        let busy = state.downloads.list().iter().any(|d| matches!(d.state, S::Queued | S::Probing | S::Downloading | S::Processing | S::Waiting));
+        {
+            let mut a = state.after.lock().unwrap();
+            a.countdown = None;
+            if !go || busy {
+                if busy {
+                    let _ = app.emit("after-all-changed", a.action.clone());
+                }
+                return;
+            }
+            a.action = "none".into();
+            a.completed_since = false;
+        }
+        let _ = app.emit("after-all-changed", "none");
+        run_after_all(&app, &action);
+    });
+}
+
+fn run_after_all(app: &AppHandle, action: &str) {
+    tracing::info!("indirmeler bitti, işlem: {action}");
+    let systemctl = |verb: &str| {
+        Command::new("systemctl").arg(verb).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
+    };
+    let ok = match action {
+        "sleep" => systemctl("suspend"),
+        "shutdown" => systemctl("poweroff"),
+        "quit" => {
+            app.exit(0);
+            true
+        }
+        _ => true,
+    };
+    if !ok {
+        let _ = app.emit("after-all-failed", action);
+    }
 }
 
 fn build_tray(app: &AppHandle) -> tauri::Result<()> {
@@ -445,7 +671,7 @@ fn main() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {
             let downloads = tauri::async_runtime::block_on(async { Downloads::new(Paths::default_dirs()) });
-            app.manage(AppState { downloads, bridge: Mutex::new(None), listening: Arc::new(AtomicBool::new(false)) });
+            app.manage(AppState { downloads, bridge: Mutex::new(None), listening: Arc::new(AtomicBool::new(false)), after: Mutex::new(AfterAll::default()) });
             let handle = app.handle().clone();
 
             // Kurulu tarayıcılara native messaging kaydı (uygulama kapalıyken eklentinin onu başlatabilmesi için).
@@ -485,6 +711,7 @@ fn main() {
             list_downloads, add_downloads, pause, resume, cancel, remove, pause_all, resume_all, clear_finished,
             get_settings, set_settings, get_status, open_file, open_folder, install_ytdlp, pick_folder,
             register_native_host, copy_text, read_clipboard, net_inspect, net_apply, net_revert,
+            verify_checksum, get_after_all, set_after_all, answer_after_all, open_extensions_page, open_extension_folder,
         ])
         .run(tauri::generate_context!())
         .expect("Nehir başlatılamadı");

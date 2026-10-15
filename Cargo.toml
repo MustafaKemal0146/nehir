@@ -5,7 +5,7 @@ members = ["crates/nehir-core", "crates/nehir-host", "crates/nehir-daemon", "cra
 default-members = ["crates/nehir-core", "crates/nehir-host", "crates/nehir-daemon"]
 
 [workspace.package]
-version = "1.0.0"
+version = "1.1.0"
 edition = "2021"
 license = "MIT"
 authors = ["Nehir contributors"]

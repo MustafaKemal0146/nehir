@@ -75,6 +75,33 @@ const TR = {
   'nh.slow_start_idle': 'Kapalıyken, bir süre boşta kalan (ama yeniden kullanılan) bağlantı yeniden yavaş başlamaz.',
   'nh.mtu_probing': 'Tünel ve VPN gibi yollarda paket boyutu sorunlarını (kara delik) aşar.',
   'ytdlpMissing': 'Video indirmek için yt-dlp gerekli. Ayarlar → Video bölümünden kurabilirsiniz.',
+  'stage.verifying': 'Doğrulanıyor…', 'detail.protocol': 'Protokol', 'detail.checksum': 'Doğrulama',
+  'ck.ok': 'Doğrulandı', 'ck.bad': 'Doğrulama başarısız', 'ck.badLong': 'Dosyanın özeti beklenenle eşleşmiyor: dosya bozuk ya da değiştirilmiş olabilir. Yeniden indirmeyi deneyin.',
+  'ck.okLong': 'Dosya, sitedeki özetle birebir aynı.', 'ck.expected': 'Beklenen', 'ck.actual': 'Hesaplanan',
+  'ck.placeholder': 'Beklenen özeti yapıştırın (MD5, SHA-1, SHA-256, SHA-512)', 'ck.verify': 'Doğrula', 'ck.compute': 'SHA-256 hesapla', 'ck.copy': 'Kopyala', 'ck.copied': 'Kopyalandı',
+  'ck.invalid': 'Geçersiz özet: 32, 40, 64 ya da 128 karakterlik onaltılık metin olmalı.',
+  'addDialog.checksum': 'Beklenen dosya özeti (isteğe bağlı)', 'addDialog.checksumPh': 'SHA-256, SHA-512, SHA-1 ya da MD5',
+  'addDialog.checksumHint': 'Sitede yazıyorsa yapıştırın; indirme bitince dosya otomatik doğrulanır. Tarayıcı eklentisi çoğu sayfada bunu kendisi bulur.',
+  'err.diskFull': 'Diskte yeterli yer yok: {need} gerekli, {free} boş.', 'err.diskFullShort': 'Diskte yeterli yer yok.', 'err.checksumRead': 'Dosya okunamadı (silinmiş ya da taşınmış olabilir).',
+  'settings.http': 'Protokol', 'settings.httpAuto': 'Otomatik (önerilen)', 'settings.http1': 'Yalnızca HTTP/1.1', 'settings.http2': 'HTTP/2',
+  'settings.httpHint': 'Otomatik: dosya HTTP/1.1 ile çok bağlantıdan indirilir; sunucu bağlantı sayısını sınırlarsa HTTP/2’ye geçilir ve parçalar tek bağlantıda sürer. HTTP/3 henüz desteklenmiyor.',
+  'settings.wizard': 'Kurulum sihirbazını aç',
+  'after.title': 'İndirmeler bitince', 'after.none': 'Hiçbir şey yapma', 'after.sleep': 'Bilgisayarı uyut', 'after.shutdown': 'Bilgisayarı kapat', 'after.quit': 'Nehir’den çık',
+  'after.hint': 'Sıradaki tüm indirmeler bitince bir kez uygulanır. Önce 60 saniyelik bir geri sayım çıkar; istersen vazgeçersin.',
+  'after.on.sleep': 'Bitince uyu', 'after.on.shutdown': 'Bitince kapat', 'after.on.quit': 'Bitince çık',
+  'after.countTitle': 'İndirmeler bitti', 'after.count.sleep': '{n} saniye sonra bilgisayar uyku moduna geçecek.', 'after.count.shutdown': '{n} saniye sonra bilgisayar kapanacak.', 'after.count.quit': '{n} saniye sonra Nehir kapanacak.',
+  'after.now': 'Şimdi yap', 'after.failed': 'Sistem bu işleme izin vermedi (bilgisayar uyutulamadı/kapatılamadı).', 'after.set': 'Bitince: {a}',
+  'wiz.title': 'Nehir’e hoş geldin', 'wiz.step': 'Adım {i} / {n}', 'wiz.next': 'İleri', 'wiz.back': 'Geri', 'wiz.skip': 'Şimdilik atla', 'wiz.finish': 'Başla',
+  'wiz.s1.title': 'İndirmeler nereye gitsin?', 'wiz.s1.text': 'Dosyalar bu klasöre kaydedilir. İstersen türüne göre alt klasörlere (Videolar, Belgeler…) ayrılır.',
+  'wiz.s2.title': 'Tarayıcı eklentisini kur', 'wiz.s2.text': 'Eklenti, tarayıcıdaki indirmeleri ve videoları yakalayıp Nehir’e gönderir. Bir kez kurman yeterli.',
+  'wiz.s2.l1': '“Eklentiler sayfasını aç”a bas (klasör yolu panoya kopyalanır).', 'wiz.s2.l2': 'Sağ üstten “Geliştirici modu”nu aç.',
+  'wiz.s2.l3': '“Paketlenmemiş öğe yükle”ye bas, açılan pencerede Ctrl+L’ye basıp yolu yapıştır ve “Seç”e tıkla.',
+  'wiz.s2.open': 'Eklentiler sayfasını aç', 'wiz.s2.folder': 'Klasörü göster', 'wiz.s2.waiting': 'Eklentinin bağlanması bekleniyor…', 'wiz.s2.ok': 'Eklenti bağlandı',
+  'wiz.s2.opened': '{b} açıldı. Yol panoya kopyalandı.', 'wiz.s2.noBrowser': 'Chromium tabanlı bir tarayıcı bulunamadı. Tarayıcının adres çubuğuna chrome://extensions yazarak açabilirsin.',
+  'wiz.s2.firefox': 'Firefox kullanıyorsan: about:debugging → “Bu Firefox” → “Geçici eklenti yükle”.',
+  'wiz.s3.title': 'Video indirme', 'wiz.s3.text': 'YouTube ve binlerce sitedeki videolar için yt-dlp kullanılır. Kurulumu tek tıkla yapılır, yönetici parolası istemez.',
+  'wiz.s4.title': 'Hazırsın', 'wiz.s4.l1': 'Tarayıcıda bir dosya indirdiğinde Nehir otomatik devralır.', 'wiz.s4.l2': 'Videoların üstündeki Nehir düğmesiyle video ya da MP3 indirebilirsin.',
+  'wiz.s4.l3': 'Bir bağlantı kopyaladığında Nehir fark eder ve sorar.', 'wiz.s4.l4': 'Sitede SHA-256 yazıyorsa dosya bitince otomatik doğrulanır.',
 };
 const EN = {
   motto: 'Not drop by drop. Like a river.',
@@ -153,6 +180,33 @@ const EN = {
   'nh.slow_start_idle': 'When off, a connection that sat idle (but is reused) does not restart from slow start.',
   'nh.mtu_probing': 'Works around packet-size problems (black holes) on tunnels and VPNs.',
   'ytdlpMissing': 'yt-dlp is required for video downloads. Install it from Settings → Video.',
+  'stage.verifying': 'Verifying…', 'detail.protocol': 'Protocol', 'detail.checksum': 'Verification',
+  'ck.ok': 'Verified', 'ck.bad': 'Verification failed', 'ck.badLong': 'The file’s checksum does not match the expected one: the file may be corrupt or modified. Try downloading it again.',
+  'ck.okLong': 'The file is identical to the checksum on the site.', 'ck.expected': 'Expected', 'ck.actual': 'Computed',
+  'ck.placeholder': 'Paste the expected checksum (MD5, SHA-1, SHA-256, SHA-512)', 'ck.verify': 'Verify', 'ck.compute': 'Compute SHA-256', 'ck.copy': 'Copy', 'ck.copied': 'Copied',
+  'ck.invalid': 'Invalid checksum: it must be 32, 40, 64 or 128 hexadecimal characters.',
+  'addDialog.checksum': 'Expected checksum (optional)', 'addDialog.checksumPh': 'SHA-256, SHA-512, SHA-1 or MD5',
+  'addDialog.checksumHint': 'If the site lists one, paste it; the file is verified automatically when the download finishes. The browser extension finds it by itself on most pages.',
+  'err.diskFull': 'Not enough disk space: {need} needed, {free} free.', 'err.diskFullShort': 'Not enough disk space.', 'err.checksumRead': 'The file could not be read (it may have been deleted or moved).',
+  'settings.http': 'Protocol', 'settings.httpAuto': 'Automatic (recommended)', 'settings.http1': 'HTTP/1.1 only', 'settings.http2': 'HTTP/2',
+  'settings.httpHint': 'Automatic: the file is downloaded over many HTTP/1.1 connections; if the server limits connections, Nehir switches to HTTP/2 and continues over a single connection. HTTP/3 is not supported yet.',
+  'settings.wizard': 'Open the setup wizard',
+  'after.title': 'When downloads finish', 'after.none': 'Do nothing', 'after.sleep': 'Put the computer to sleep', 'after.shutdown': 'Shut down the computer', 'after.quit': 'Quit Nehir',
+  'after.hint': 'Runs once, when every queued download has finished. A 60-second countdown appears first so you can cancel.',
+  'after.on.sleep': 'Sleep when done', 'after.on.shutdown': 'Shut down when done', 'after.on.quit': 'Quit when done',
+  'after.countTitle': 'Downloads finished', 'after.count.sleep': 'The computer will sleep in {n} seconds.', 'after.count.shutdown': 'The computer will shut down in {n} seconds.', 'after.count.quit': 'Nehir will quit in {n} seconds.',
+  'after.now': 'Do it now', 'after.failed': 'The system did not allow this (the computer could not sleep / shut down).', 'after.set': 'When done: {a}',
+  'wiz.title': 'Welcome to Nehir', 'wiz.step': 'Step {i} of {n}', 'wiz.next': 'Next', 'wiz.back': 'Back', 'wiz.skip': 'Skip for now', 'wiz.finish': 'Get started',
+  'wiz.s1.title': 'Where should downloads go?', 'wiz.s1.text': 'Files are saved in this folder and, if you like, sorted into sub-folders by type (Videos, Documents…).',
+  'wiz.s2.title': 'Install the browser extension', 'wiz.s2.text': 'The extension catches downloads and videos in your browser and sends them to Nehir. You only need to do this once.',
+  'wiz.s2.l1': 'Press “Open extensions page” (the folder path is copied to the clipboard).', 'wiz.s2.l2': 'Turn on “Developer mode” at the top right.',
+  'wiz.s2.l3': 'Press “Load unpacked”, press Ctrl+L in the window that opens, paste the path and click “Select”.',
+  'wiz.s2.open': 'Open extensions page', 'wiz.s2.folder': 'Show folder', 'wiz.s2.waiting': 'Waiting for the extension to connect…', 'wiz.s2.ok': 'Extension connected',
+  'wiz.s2.opened': '{b} opened. The path was copied to the clipboard.', 'wiz.s2.noBrowser': 'No Chromium-based browser was found. Type chrome://extensions into your browser’s address bar to open it.',
+  'wiz.s2.firefox': 'On Firefox: about:debugging → “This Firefox” → “Load Temporary Add-on”.',
+  'wiz.s3.title': 'Video downloads', 'wiz.s3.text': 'yt-dlp is used for videos on YouTube and thousands of other sites. It installs with one click and needs no administrator password.',
+  'wiz.s4.title': 'You are all set', 'wiz.s4.l1': 'When you download a file in your browser, Nehir takes over automatically.', 'wiz.s4.l2': 'Use the Nehir button on videos to save the video or an MP3.',
+  'wiz.s4.l3': 'When you copy a link, Nehir notices and asks.', 'wiz.s4.l4': 'If the site lists a SHA-256, the file is verified automatically when it finishes.',
 };
 const DICTS = { tr: TR, en: EN };
 let lang = 'tr';
@@ -163,7 +217,11 @@ export function setLanguage(resolved) {
   document.documentElement.lang = lang;
 }
 export const getLanguage = () => lang;
-export const t = (key) => DICTS[lang][key] ?? DICTS.en[key] ?? key;
+export const t = (key, vars) => {
+  let s = DICTS[lang][key] ?? DICTS.en[key] ?? key;
+  if (vars) for (const [k, v] of Object.entries(vars)) s = s.replaceAll(`{${k}}`, v);
+  return s;
+};
 
 export function applyI18n(root = document) {
   root.querySelectorAll('[data-i18n]').forEach((el) => { el.textContent = t(el.dataset.i18n); });

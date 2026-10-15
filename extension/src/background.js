@@ -176,6 +176,71 @@ function cleanTitle(title) {
   return String(title || '').replace(/^\(\d+\)\s*/, '').replace(/\s*[-–|]\s*YouTube\s*$/i, '').trim().slice(0, 150);
 }
 
+// ---------- Dosya özeti (bütünlük doğrulaması) ----------
+// İndirmenin başladığı sayfada, dosya adının yanında yazan SHA-256 (vb.) ya da sayfadaki SHA256SUMS dosyası.
+// Bulunursa uygulama indirme bitince dosyayı doğrular. En çok ~2.5 sn sürer; bulunamazsa indirme yine başlar.
+const withTimeout = (p, ms) => Promise.race([p, new Promise((r) => setTimeout(() => r(null), ms))]);
+
+async function findTab(tabId, pageUrl) {
+  if (tabId != null && tabId >= 0) return tabId;
+  if (!pageUrl) return null;
+  try {
+    const tabs = await api.tabs.query({});
+    const exact = tabs.find((t) => t.url === pageUrl);
+    return exact ? exact.id : null;
+  } catch { return null; }
+}
+
+// Satırda dosya adı tam olarak geçiyor mu? ("server.iso", "live-server.iso" ya da "server.iso.sha256" içinde sayılmaz.)
+function hasName(low, names) {
+  for (const n of names) {
+    for (let i = low.indexOf(n); i >= 0; i = low.indexOf(n, i + 1)) {
+      const before = low[i - 1] || '', after = low[i + n.length] || '', next = low[i + n.length + 1] || '';
+      if (/[\w.-]/.test(before)) continue;
+      if (/[\w-]/.test(after) || (after === '.' && /\w/.test(next))) continue;
+      return true;
+    }
+  }
+  return false;
+}
+function parseSums(text, names) {
+  const lines = String(text).split('\n');
+  const hexRe = /\b([a-f0-9]{128}|[a-f0-9]{64}|[a-f0-9]{40}|[a-f0-9]{32})\b/i;
+  const byLen = { 32: 'md5', 40: 'sha1', 64: 'sha256', 128: 'sha512' };
+  const fmt = (h) => `${byLen[h.length]}:${h.toLowerCase()}`;
+  for (const line of lines) {
+    const low = line.toLowerCase();
+    // GNU: "<özet>  *dosya" · BSD: "SHA256 (dosya) = <özet>"
+    if (!hasName(low, names)) continue;
+    const m = hexRe.exec(line);
+    if (m) return fmt(m[1]);
+  }
+  // Tek dosyalık özet dosyası (dosya.iso.sha256): yalnızca özet yazar.
+  const only = lines.map((l) => l.trim()).filter(Boolean);
+  if (only.length === 1) { const m = hexRe.exec(only[0]); if (m && m[1].length >= 64) return fmt(m[1]); }
+  return null;
+}
+
+async function checksumFor(tabId, pageUrl, filename, url) {
+  try {
+    const id = await findTab(tabId, pageUrl);
+    if (id == null) return null;
+    const r = await withTimeout(api.tabs.sendMessage(id, { type: 'findChecksum', filename, url }, { frameId: 0 }).catch(() => null), 800);
+    if (!r) return null;
+    if (r.checksum) return r.checksum;
+    const names = new Set([filename, (() => { try { return decodeURIComponent(new URL(url).pathname.split('/').pop()); } catch { return ''; } })()]
+      .map((n) => String(n || '').toLowerCase()).filter((n) => n.length >= 3));
+    for (const link of (r.links || []).slice(0, 3)) {
+      const text = await withTimeout(fetch(link, { credentials: 'omit', cache: 'no-store' })
+        .then((res) => (res.ok && Number(res.headers.get('content-length') || 0) < 512 * 1024 ? res.text() : ''))
+        .catch(() => ''), 1500);
+      const c = text && text.length < 512 * 1024 ? parseSums(text, names) : null;
+      if (c) return c;
+    }
+  } catch {}
+  return null;
+}
+
 async function sendToApp({ url, filename, referer, kind, tabId, title, audio, quality }) {
   await NehirI18n.ready;
   if (audio) kind = 'video'; // MP3'e çevirme yt-dlp ile yapılır
@@ -187,6 +252,7 @@ async function sendToApp({ url, filename, referer, kind, tabId, title, audio, qu
     fallbackUrls: kind === 'video' ? await fallbackUrlsFor(tabId, url) : [],
     titleHint: cleanTitle(title),
     quality: audio ? 'audio' : quality || undefined,
+    checksum: kind === 'file' ? (await checksumFor(tabId, referer, filename, url)) || undefined : undefined,
   };
   const post = () => bridge('/download', {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload),
@@ -395,7 +461,7 @@ api.runtime.onStartup?.addListener(() => { createMenus(); ping(); });
 menus?.onClicked.addListener((info, tab) => {
   if (info.menuItemId === 'nehir-link') {
     const url = info.linkUrl || info.srcUrl;
-    if (url) sendToApp({ url, referer: info.pageUrl || tab?.url, kind: 'file' });
+    if (url) sendToApp({ url, referer: info.pageUrl || tab?.url, kind: 'file', tabId: tab?.id });
   } else if (info.menuItemId === 'nehir-page-video' || info.menuItemId === 'nehir-page-audio') {
     const url = info.pageUrl || tab?.url;
     if (url) sendToApp({ url, referer: url, kind: 'video', tabId: tab?.id, title: tab?.title, audio: info.menuItemId === 'nehir-page-audio' });

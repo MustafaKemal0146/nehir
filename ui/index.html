@@ -23,6 +23,10 @@
         <div class="search"><span class="ico" data-icon="search"></span><input id="search" type="search" data-i18n-ph="search"></div>
         <div class="spacer" data-tauri-drag-region></div>
         <div class="stat" id="total-speed"></div>
+        <div class="after-wrap">
+          <button class="icon-btn" id="btn-after" data-i18n-title="after.title"><span class="ico" data-icon="power"></span><span class="after-label" id="after-label" hidden></span></button>
+          <div class="menu" id="after-menu" hidden></div>
+        </div>
         <button class="icon-btn" id="btn-pause-all" data-i18n-title="pauseAll"><span class="ico" data-icon="pause"></span></button>
         <button class="icon-btn" id="btn-resume-all" data-i18n-title="resumeAll"><span class="ico" data-icon="play"></span></button>
         <button class="icon-btn" id="btn-clear" data-i18n-title="clearFinished"><span class="ico" data-icon="broom"></span></button>
@@ -52,6 +56,11 @@
         <label for="add-quality" data-i18n="addDialog.quality"></label>
         <select id="add-quality"></select>
       </div>
+      <div class="field" id="add-checksum-field">
+        <label for="add-checksum" data-i18n="addDialog.checksum"></label>
+        <input type="text" id="add-checksum" spellcheck="false" autocomplete="off" data-i18n-ph="addDialog.checksumPh">
+        <div class="hint" data-i18n="addDialog.checksumHint"></div>
+      </div>
       <p class="hint" data-i18n="addDialog.hint"></p>
       <div class="buttons">
         <button type="button" id="add-cancel" data-i18n="cancel"></button>
@@ -63,6 +72,16 @@
   <dialog id="dlg-settings"><div id="settings-body"></div></dialog>
   <dialog id="dlg-net"><div id="net-body"></div></dialog>
   <dialog id="dlg-browser"><div id="browser-body"></div></dialog>
+  <dialog id="dlg-wizard" class="wizard"><div id="wizard-body"></div></dialog>
+  <dialog id="dlg-after" class="after-dlg">
+    <div class="after-ring"><span class="ico" data-icon="power" data-size="26"></span></div>
+    <h3 data-i18n="after.countTitle"></h3>
+    <p id="after-count"></p>
+    <div class="buttons">
+      <button type="button" id="after-cancel" data-i18n="cancel"></button>
+      <button type="button" class="primary" id="after-now" data-i18n="after.now"></button>
+    </div>
+  </dialog>
   <div id="toasts"></div>
   <script type="module" src="/src/main.js"></script>
 </body>

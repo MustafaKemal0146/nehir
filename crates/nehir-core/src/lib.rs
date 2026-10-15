@@ -1,4 +1,5 @@
 pub mod bridge;
+pub mod checksum;
 pub mod engine;
 pub mod manager;
 pub mod model;

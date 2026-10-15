@@ -33,7 +33,10 @@ Linux lacks a download manager that **steps into your browser and takes over dow
 | | |
 |---|---|
 | ⚡ **Multi-connection downloads** | Splits a file into 1–32 parts and downloads them in parallel. An idle connection splits the biggest remaining part and takes half of it, so speed does not drop at the end. |
-| ⏯️ **Pause and resume** | Survives closing the app or rebooting; it continues where it stopped. |
+| ⏯️ **Pause and resume** | Survives closing the app or rebooting; it continues by itself where it stopped. |
+| 🛡️ **File verification** | If the site lists a SHA-256 (or SHA-512, SHA-1, MD5), the extension finds it on the page or in a `SHA256SUMS` file, and the file is verified automatically when it finishes. You can also paste one. |
+| 🔀 **Smart protocol** | Files download over many HTTP/1.1 connections; if the server limits connections, Nehir switches to HTTP/2 and continues over one connection. |
+| 💾 **Disk pre-allocation** | The file's space is reserved up front (`fallocate`): less fragmentation, and a full disk is reported at the start, not hours later. |
 | 🌐 **Network-loss tolerant** | When the connection drops, the download goes to "Waiting for network" and resumes by itself when the network is back or the computer wakes from sleep. |
 | 🧩 **Browser extension** | One extension for Chrome, Brave, Edge, Chromium, Vivaldi, Opera and Firefox. Captures browser downloads and forwards cookies and `Referer` (sites that need a login work). |
 | 🎬 **Download any video** | YouTube, Vimeo, X, Instagram, TikTok, Twitch, Dailymotion and 1000+ more through `yt-dlp`, including HLS (`.m3u8`) and DASH (`.mpd`) streams. |
@@ -41,7 +44,9 @@ Linux lacks a download manager that **steps into your browser and takes over dow
 | 🎵 **Download as MP3** | One click from the same menu. Lands in the `Music` folder. |
 | 🗂️ **Automatic organising** | Files go to `Videos`, `Music`, `Documents`, `Archives`, `Programs`, `Images`. Partial files live in a hidden folder, so your download folder stays clean. |
 | 🚦 **Queue and speed limit** | Choose how many downloads run at once and the total speed. |
-| 🔔 **Tray, clipboard, notifications** | Lives in the system tray and tells you when a downloadable link is on the clipboard. |
+| 🔔 **Tray, clipboard, notifications** | Lives in the system tray and tells you when a downloadable link is on the clipboard. Notifications have **Open**, **Show in folder** and **Retry** buttons. |
+| 🌙 **When downloads finish** | Put the computer to sleep, shut it down or quit Nehir. A 60-second countdown you can cancel appears first. |
+| 🧭 **Setup wizard** | On first launch it walks you through the download folder, the browser extension (it opens the extensions page and tells you when it connects) and `yt-dlp`. |
 | 🌍 **Turkish and English** | The language follows your computer's language automatically. |
 | 🛜 **Network optimisation** | Inspects TCP/IP (BBR, buffers) and Wi-Fi driver settings; applies them with your approval and reverts in one click. [Details](#-network-optimisation) |
 | 🔒 **Secure bridge** | Only browser extensions can talk to the local bridge. [Details](#-security) |
@@ -64,7 +69,7 @@ Linux lacks a download manager that **steps into your browser and takes over dow
 Download the `.deb` from [**Releases**](https://github.com/MustafaKemal0146/nehir/releases/latest):
 
 ```bash
-sudo apt install ./nehir_1.0.0_amd64.deb
+sudo apt install ./nehir_1.1.0_amd64.deb
 ```
 
 Open **Nehir** from your menu. (`apt` installs the required libraries automatically.)
@@ -96,6 +101,8 @@ Open Nehir → **Settings → Video → Install yt-dlp**. It installs into your 
 - **Right-click:** on a link → *Download with Nehir*. On the page background → *Download this page's video / as MP3*.
 - **Add manually:** **Add** in the app (or `Ctrl+N`) and paste an address. Dragging a link onto the window works too.
 - **Extension popup:** the toolbar icon shows the media on the page and download progress.
+- **File verification:** click a download to open its details: the result and the computed checksum are there; paste an expected checksum and press **Verify**.
+- **When done:** the power button in the top bar offers *Sleep / Shut down / Quit Nehir*; it runs once.
 
 ## 🛜 Network optimisation
 
@@ -119,7 +126,7 @@ The **Network** button (bottom left) inspects your computer's network settings a
   adds cookies + Referer)   (extensions only)    yt-dlp · ffmpeg · persistent state
 ```
 
-- **Engine** (`nehir-core`): HTTP `Range` multi-part downloads, retry with back-off on network errors (429/503), single-stream fallback when ranges are unsupported, resumable part state on disk.
+- **Engine** (`nehir-core`): HTTP `Range` multi-part downloads, retry with back-off on network errors (429/503), switching to HTTP/2 when the server limits connections, single-stream fallback when ranges are unsupported, `fallocate` pre-allocation, resumable part state on disk, checksum verification at the end.
 - **Bridge:** the extension posts downloads to the app through a tiny HTTP API on `127.0.0.1`.
 - **Native host** (`nehir-host`): lets the browser start the app when it is closed. No URLs or cookies pass through it.
 - **Network tuning** (`nettune`): inspects the system read-only; the writing is done only with the user's approval by a small privileged helper.
@@ -164,7 +171,10 @@ To try the UI without building the app: `cd ui && npm run dev`. Outside Tauri it
 - [ ] Flatpak (Flathub) and AppImage packages
 - [ ] Chrome Web Store and Firefox AMO releases
 - [x] Network optimisation (TCP/IP + Wi-Fi)
-- [ ] Scheduler ("start at 02:00, shut down when done")
+- [x] Sleep / shut down when downloads finish
+- [x] File integrity verification (SHA-256, SHA-512, SHA-1, MD5)
+- [x] First-run setup wizard
+- [ ] Scheduler ("start at 02:00")
 - [ ] Playlist and channel downloads
 - [ ] Subtitles, cover art and MP3 tags
 - [ ] Download history and search

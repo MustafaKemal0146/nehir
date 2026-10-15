@@ -160,3 +160,69 @@ dialog .buttons { position: sticky; bottom: -22px; background: linear-gradient(t
 .buttons.left { justify-content: flex-start; align-items: center; margin-top: 12px; }
 
 #empty .motto { font-style: italic; color: var(--accent); margin: 0 0 10px; font-weight: 600; }
+
+/* İndirmeler bitince menüsü */
+.after-wrap { position: relative; }
+#btn-after { width: auto; min-width: 34px; gap: 6px; }
+#btn-after.armed { color: var(--warn); border-color: color-mix(in srgb, var(--warn) 55%, transparent); background: color-mix(in srgb, var(--warn) 12%, var(--panel)); }
+.after-label { font-size: 12.5px; font-weight: 600; white-space: nowrap; }
+.after-label[hidden] { display: none; }
+.menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: 40; min-width: 250px; padding: 6px; border-radius: 12px; background: var(--panel); border: 1px solid var(--line); box-shadow: 0 12px 34px rgba(0, 0, 0, .28); animation: pop .15s ease-out; }
+.menu[hidden] { display: none; }
+.menu-head { font-size: 11px; font-weight: 700; letter-spacing: .07em; text-transform: uppercase; color: var(--muted); padding: 6px 10px 4px; }
+.menu-item { width: 100%; border: 0; background: transparent; justify-content: flex-start; padding: 8px 10px; border-radius: 8px; color: var(--fg); }
+.menu-item:hover { background: var(--panel-2); border: 0; }
+.menu-item.on { color: var(--accent); font-weight: 600; }
+.menu-item .tick { margin-left: auto; display: inline-flex; }
+.menu-hint { font-size: 12px; color: var(--muted); padding: 6px 10px 4px; border-top: 1px solid var(--line); margin-top: 4px; max-width: 250px; }
+.after-dlg { width: min(400px, 92vw); text-align: center; }
+.after-dlg .buttons { justify-content: center; position: static; background: none; }
+.after-ring { width: 64px; height: 64px; margin: 4px auto 10px; border-radius: 50%; display: grid; place-items: center; color: var(--warn); background: color-mix(in srgb, var(--warn) 14%, transparent); animation: pulse 1.6s ease-in-out infinite; }
+#after-count { color: var(--muted); font-variant-numeric: tabular-nums; }
+@keyframes pulse { 50% { transform: scale(1.06); } }
+
+/* Dosya doğrulama */
+.ck { display: inline-flex; align-items: center; gap: 4px; font-weight: 600; }
+.ck.ok { color: var(--ok); } .ck.bad { color: var(--bad); }
+.ck-panel { display: grid; gap: 8px; border-top: 1px dashed var(--line); padding-top: 10px; }
+.ck-result { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 9px; font-size: 12.5px; }
+.ck-result svg { flex: none; margin-top: 1px; }
+.ck-result.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); }
+.ck-result.bad { color: var(--bad); background: color-mix(in srgb, var(--bad) 12%, transparent); }
+.ck-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.ck-line .k { flex: none; }
+.ck-line code { flex: 1; min-width: 0; padding: 4px 8px; font-size: 11.5px; user-select: all; }
+button.mini { padding: 4px; width: 28px; height: 28px; justify-content: center; flex: none; }
+.pair { display: flex; gap: 8px; }
+.pair input { flex: 1; min-width: 0; }
+.pair button { flex: none; }
+.spinner { width: 14px; height: 14px; border-radius: 50%; border: 2px solid color-mix(in srgb, var(--accent) 25%, transparent); border-top-color: var(--accent); animation: spin .8s linear infinite; flex: none; display: inline-block; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+/* İlk açılış sihirbazı */
+.wizard { width: min(600px, 94vw); }
+.wiz-head { display: flex; gap: 12px; align-items: center; }
+.wiz-head h3 { margin: 0; }
+.wiz-head .motto { color: var(--accent); font-style: italic; font-size: 13px; font-weight: 600; }
+.wiz-dots { display: flex; gap: 6px; margin: 16px 0 4px; }
+.wiz-dots i { height: 4px; flex: 1; border-radius: 2px; background: var(--panel-2); }
+.wiz-dots i.done { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.wiz-dots i.on { background: linear-gradient(90deg, var(--accent), var(--accent-2)); }
+.wiz-page { min-height: 250px; }
+.wiz-page h4 { font-size: 15px; text-transform: none; letter-spacing: 0; color: var(--fg); margin: 16px 0 4px; }
+.wiz-page .pair { margin-top: 12px; }
+.wiz-list { margin: 10px 0; padding-left: 20px; display: grid; gap: 5px; font-size: 13.5px; }
+.wiz-page .path { margin: 10px 0 0; }
+.wiz-live { display: flex; align-items: center; gap: 8px; margin-top: 12px; padding: 9px 12px; border-radius: 10px; background: var(--panel-2); color: var(--muted); font-size: 13px; }
+.wiz-live.ok { color: var(--ok); background: color-mix(in srgb, var(--ok) 12%, transparent); font-weight: 600; }
+.wiz-tips { list-style: none; padding: 0; margin: 12px 0; display: grid; gap: 10px; }
+.wiz-tips li { display: flex; gap: 10px; align-items: flex-start; font-size: 13.5px; }
+.wiz-tips svg { color: var(--accent); flex: none; margin-top: 2px; }
+.wiz-nav { align-items: center; }
+.wiz-step { margin-right: auto; color: var(--muted); font-size: 12.5px; }
+.buttons.left button { flex: none; }
+.buttons.left { flex-wrap: wrap; }
+@media (max-width: 560px) { .after-label { display: none; } }
+.field.inline .badge { justify-self: start; }
+#topbar { position: relative; z-index: 30; }
+[hidden] { display: none !important; }

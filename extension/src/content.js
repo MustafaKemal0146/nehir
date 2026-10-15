@@ -29,6 +29,76 @@
   // ---- İndirme düğmesi ----
   if (window.top !== window) return; // yalnızca ana çerçevede; iframe içindeki videolar sayfa adresiyle indirilir
 
+  // ---- Dosya özeti (SHA-256 vb.) bulma ----
+  // Arka plan betiği, bu sayfadan başlatılan bir indirme için sorar. Sayfada dosya adının yakınında yazan özet
+  // aranır; bulunamazsa sayfadaki SHA256SUMS / *.sha256 bağlantıları döndürülür (arka plan onları okur).
+  const HEX = /(?:^|[^a-f0-9])([a-f0-9]{128}|[a-f0-9]{64}|[a-f0-9]{40}|[a-f0-9]{32})(?![a-f0-9])/gi;
+  const ALGO_WORD = /\b(sha-?512|sha-?256|sha-?1|md5)\b/i;
+  const SUMS_LINK = /(sha(256|512|1)?sums?|checksums?|md5sums?)(\.txt|\.asc)?$|\.(sha256|sha512|sha1|md5)(sum)?(\.txt)?$/i;
+  const FILE_TOKEN = /[\w.+-]+\.(?:iso|img|zip|gz|tgz|xz|bz2|zst|7z|rar|tar|exe|msi|deb|rpm|dmg|pkg|appimage|apk|bin|run|jar|whl|msix|flatpak)\b/gi;
+  const hashesIn = (line) => [...line.matchAll(HEX)].map((m) => m[1].toLowerCase());
+  // 64/128 haneli değerler (SHA-256/512) kendi başına güvenilirdir; 32/40 hane (MD5/SHA-1, git commit kimliği de olabilir)
+  // yalnızca satırda algoritma adı yazıyorsa kabul edilir.
+  // Satırda dosya adı tam olarak geçiyor mu? ("server.iso", "live-server.iso" ya da "server.iso.sha256" içinde sayılmaz.)
+  function hasName(low, names) {
+    for (const n of names) {
+      for (let i = low.indexOf(n); i >= 0; i = low.indexOf(n, i + 1)) {
+        const before = low[i - 1] || '', after = low[i + n.length] || '', next = low[i + n.length + 1] || '';
+        if (/[\w.-]/.test(before)) continue;
+        if (/[\w-]/.test(after) || (after === '.' && /\w/.test(next))) continue;
+        return true;
+      }
+    }
+    return false;
+  }
+  function pick(hashes, context) {
+    const word = (ALGO_WORD.exec(context) || [])[1]?.toLowerCase().replace('-', '');
+    const byLen = { 32: 'md5', 40: 'sha1', 64: 'sha256', 128: 'sha512' };
+    for (const len of [64, 128, 40, 32]) {
+      const h = hashes.find((x) => x.length === len);
+      if (!h) continue;
+      if (len >= 64 || word === byLen[len]) return `${byLen[len]}:${h}`;
+    }
+    return null;
+  }
+  function findChecksum(filename, url) {
+    const names = new Set();
+    const add = (n) => { n = String(n || '').trim().toLowerCase(); if (n.length >= 3) names.add(n); };
+    add(filename);
+    try { add(decodeURIComponent(new URL(url).pathname.split('/').pop())); } catch {}
+    const text = document.body ? document.body.innerText : '';
+    if (!text || text.length > 4_000_000) return { checksum: null, links: [] };
+    const lines = text.split('\n');
+    for (let i = 0; i < lines.length; i++) {
+      const low = lines[i].toLowerCase();
+      if (!hasName(low, names)) continue;
+      // Aynı satır, sonra yakın satırlar (tablolarda özet çoğu zaman alt/üst satırdadır).
+      for (const j of [i, i + 1, i - 1, i + 2, i + 3, i - 2]) {
+        if (j < 0 || j >= lines.length) continue;
+        // Yan satır başka bir dosyanın adını taşıyorsa onun özetidir, bizim değil.
+        if (j !== i && [...lines[j].matchAll(FILE_TOKEN)].some((m) => !names.has(m[0].toLowerCase()))) continue;
+        const ctx = [lines[j - 1], lines[j], lines[j + 1]].filter(Boolean).join(' ');
+        const c = pick(hashesIn(lines[j]), ctx);
+        if (c) return { checksum: c, links: [] };
+      }
+    }
+    // Sayfada tek bir SHA-256/512 varsa ve sayfa özetten söz ediyorsa (tek dosyalık indirme sayfaları).
+    const all = [...new Set(hashesIn(text).filter((h) => h.length >= 64))];
+    if (all.length === 1 && /sha-?(256|512)|checksum|sağlama|hash/i.test(text)) {
+      return { checksum: `${all[0].length === 64 ? 'sha256' : 'sha512'}:${all[0]}`, links: [] };
+    }
+    const links = [...document.querySelectorAll('a[href]')]
+      .map((a) => a.href)
+      .filter((h) => /^https?:/i.test(h) && SUMS_LINK.test(h.split(/[?#]/)[0]))
+      .sort((a, b) => [...names].some((n) => b.toLowerCase().includes(n)) - [...names].some((n) => a.toLowerCase().includes(n)));
+    return { checksum: null, links: [...new Set(links)].slice(0, 4) };
+  }
+  api.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
+    if (msg?.type !== 'findChecksum') return false;
+    try { sendResponse(findChecksum(msg.filename, msg.url)); } catch { sendResponse({ checksum: null, links: [] }); }
+    return false;
+  });
+
   let enabled = true;
   // Çarpıyla kapatılan sayfa adresi. Yalnızca bu sayfa yüklemesi için geçerlidir (kalıcı değil):
   // sayfa yenilenince ya da başka videoya geçilince (adres değişince) düğme geri gelir.

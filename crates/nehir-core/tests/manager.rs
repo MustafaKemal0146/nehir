@@ -322,3 +322,69 @@ async fn audio_requests_go_to_music_folder_and_keep_quality() {
         .unwrap();
     assert_eq!(d2.quality, None);
 }
+
+fn sha256_of(b: &[u8]) -> String {
+    let dir = tempfile::tempdir().unwrap();
+    let p = dir.path().join("x");
+    std::fs::write(&p, b).unwrap();
+    nehir_core::checksum::hash_file(&p, nehir_core::checksum::Algo::Sha256).unwrap()
+}
+
+#[tokio::test]
+async fn verifies_checksum_after_download() {
+    let base = start_server().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path());
+    let good = sha256_of(&data(SIZE));
+    let hex = good.trim_start_matches("sha256:").to_uppercase();
+    let ok = m.add(NewDownload { url: format!("{base}/a.bin"), checksum: Some(hex), ..Default::default() }).unwrap();
+    let bad = m
+        .add(NewDownload { url: format!("{base}/b.bin"), checksum: Some(format!("sha256:{}", "0".repeat(64))), ..Default::default() })
+        .unwrap();
+    let ok = wait_for(&m, ok.id, |d| d.state == State::Completed).await;
+    assert_eq!(ok.checksum_ok, Some(true));
+    assert_eq!(ok.checksum_actual.as_deref(), Some(good.as_str()));
+    let bad = wait_for(&m, bad.id, |d| d.state == State::Completed).await;
+    assert_eq!(bad.checksum_ok, Some(false));
+}
+
+#[tokio::test]
+async fn verifies_completed_file_on_request() {
+    let base = start_server().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path());
+    let d = m.add(NewDownload { url: format!("{base}/c.bin"), ..Default::default() }).unwrap();
+    let d = wait_for(&m, d.id, |d| d.state == State::Completed).await;
+    assert_eq!(d.checksum_ok, None);
+    assert_eq!(m.verify(d.id, Some("nonsense".into())), Err("invalid_checksum".into()));
+    // Beklenen verilmeden: yalnızca SHA-256 hesaplanır.
+    m.verify(d.id, None).unwrap();
+    let h = wait_for(&m, d.id, |d| d.checksum_actual.is_some() && d.stage.is_none()).await;
+    assert_eq!(h.checksum_actual.unwrap(), sha256_of(&data(SIZE)));
+    assert_eq!(h.checksum_ok, None);
+    // MD5 ile karşılaştırma.
+    let md5 = {
+        let dir = tempfile::tempdir().unwrap();
+        let p = dir.path().join("x");
+        std::fs::write(&p, data(SIZE)).unwrap();
+        nehir_core::checksum::hash_file(&p, nehir_core::checksum::Algo::Md5).unwrap()
+    };
+    m.verify(d.id, Some(md5.trim_start_matches("md5:").to_string())).unwrap();
+    let v = wait_for(&m, d.id, |d| d.checksum_ok.is_some()).await;
+    assert_eq!(v.checksum_ok, Some(true));
+    assert_eq!(v.checksum_actual, Some(md5));
+}
+
+#[tokio::test]
+async fn http2_setting_still_downloads_plain_http() {
+    let base = start_server().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path());
+    let mut s = m.settings();
+    s.http_version = "http2".into();
+    m.update_settings(s);
+    let d = m.add(NewDownload { url: format!("{base}/h.bin"), ..Default::default() }).unwrap();
+    let d = wait_for(&m, d.id, |d| d.state == State::Completed).await;
+    assert_eq!(std::fs::read(d.dir.join(&d.file_name)).unwrap(), data(SIZE));
+    assert_eq!(d.protocol.as_deref(), Some("HTTP/1.1")); // TLS'siz sunucuda HTTP/2 anlaşılamaz
+}
