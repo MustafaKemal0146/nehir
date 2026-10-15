@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Nehir .deb paketi üretir. Önce: (cd ui && npm run build) && node extension/build.mjs && cargo build --release -p nehir-app --features custom-protocol && cargo build --release -p nehir-host
+# Nehir .deb paketi üretir. Önce: (cd ui && npm run build) && node extension/build.mjs && cargo build --release -p nehir-app -p nehir-host
 # Kullanım: packaging/build-deb.sh [sürüm]
 set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"

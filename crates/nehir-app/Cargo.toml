@@ -11,6 +11,8 @@ path = "src/main.rs"
 
 [features]
 # Yayın sürümü: arayüzü gömülü dosyalardan sunar (yoksa devUrl'ye, yani localhost:5173'e bağlanmaya çalışır).
+# Varsayılan açık: düz `cargo build --release` da doğru çalışan paket üretir.
+default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
 
 [dependencies]

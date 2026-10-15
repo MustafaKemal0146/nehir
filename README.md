@@ -157,7 +157,7 @@ node extension/build.mjs                # eklenti → extension/dist/{chrome,fir
 cargo run -p nehir-app                  # uygulamayı çalıştır
 
 # .deb paketi üret
-cargo build --release -p nehir-app --features custom-protocol && cargo build --release -p nehir-host
+cargo build --release -p nehir-app -p nehir-host
 packaging/build-deb.sh                  # → dist/nehir_<sürüm>_amd64.deb
 ```
 
