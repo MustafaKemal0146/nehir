@@ -127,11 +127,13 @@ impl Manager {
             .ok()
             .and_then(|b| serde_json::from_slice(&b).ok())
             .unwrap_or_default();
-        // Uygulama kapanırken yarıda kalanlar duraklatılmış sayılır.
+        // Uygulama/bilgisayar kapanırken yarıda kalanları kullanıcı durdurmadı; açılışta kendiliğinden sürer.
+        // (Kullanıcının bilerek duraklattıkları `Paused` kalır.)
         for d in &mut items {
             if d.state.is_active() {
-                d.state = State::Paused;
+                d.state = State::Queued;
                 d.speed = 0.0;
+                d.error = None;
             } else if d.state == State::Waiting {
                 d.state = State::Queued; // uygulama yeniden başlayınca hemen tekrar dene
                 d.retry_at = None;

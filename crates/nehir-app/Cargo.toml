@@ -9,6 +9,10 @@ description = "Nehir — hızlı, çok bağlantılı indirme yöneticisi"
 name = "nehir"
 path = "src/main.rs"
 
+[features]
+# Yayın sürümü: arayüzü gömülü dosyalardan sunar (yoksa devUrl'ye, yani localhost:5173'e bağlanmaya çalışır).
+custom-protocol = ["tauri/custom-protocol"]
+
 [dependencies]
 nehir-core = { path = "../nehir-core" }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }

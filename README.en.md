@@ -153,7 +153,7 @@ node extension/build.mjs                # extension → extension/dist/{chrome,f
 cargo run -p nehir-app                  # run the app
 
 # build a .deb
-cargo build --release -p nehir-app -p nehir-host
+cargo build --release -p nehir-app --features custom-protocol && cargo build --release -p nehir-host
 packaging/build-deb.sh                  # → dist/nehir_<version>_amd64.deb
 ```
 

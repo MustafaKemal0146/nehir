@@ -229,6 +229,21 @@ async fn resumes_automatically_when_server_comes_back() {
 }
 
 #[tokio::test]
+async fn interrupted_download_resumes_by_itself_after_restart() {
+    let base = start_server().await;
+    let tmp = tempfile::tempdir().unwrap();
+    let m = manager(tmp.path());
+    let d = m.add(NewDownload { url: format!("{base}/slow1"), ..Default::default() }).unwrap();
+    wait_for(&m, d.id, |d| d.state == State::Downloading && d.received_bytes > 200_000).await;
+    tokio::time::sleep(Duration::from_millis(1500)).await; // periyodik kayıt yazsın
+    drop(m); // bilgisayar kapandı: kullanıcı duraklatmadı
+
+    let m2 = manager(tmp.path());
+    let done = wait_for(&m2, d.id, |d| d.state == State::Completed).await;
+    assert_eq!(done.error, None);
+}
+
+#[tokio::test]
 async fn pausing_a_waiting_download_stops_retries() {
     let tmp = tempfile::tempdir().unwrap();
     let m = manager(tmp.path());
