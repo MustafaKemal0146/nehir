@@ -19,12 +19,27 @@ dirs = "5"
 percent-encoding = "2"
 url = "2"
 regex = "1"
-libc = "0.2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 tower-http = { version = "0.5", features = ["cors"] }
 sha2 = "0.10"
 sha1 = "0.10"
 md-5 = "0.10"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.55"
+windows-sys = { version = "0.61", features = [
+  "Win32_Foundation",
+  "Win32_Globalization",
+  "Win32_Security",
+  "Win32_Storage_FileSystem",
+  "Win32_System_IO",
+  "Win32_System_JobObjects",
+  "Win32_System_Power",
+  "Win32_System_Threading",
+] }
 
 [dev-dependencies]
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }

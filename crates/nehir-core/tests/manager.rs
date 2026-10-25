@@ -286,7 +286,9 @@ async fn detected_media_is_named_after_page_title() {
         .add(NewDownload { url: format!("{base}/850x480"), title_hint: Some("Güzel: Bir/Video".into()), ..Default::default() })
         .unwrap();
     let done = wait_for(&m, d.id, |d| d.state == State::Completed).await;
-    assert_eq!(done.file_name, "Güzel: Bir-Video.mp4");
+    // Windows'ta `:` dosya adında kullanılamaz; okunur bir ayraca çevrilir.
+    let expected = if cfg!(windows) { "Güzel - Bir-Video.mp4" } else { "Güzel: Bir-Video.mp4" };
+    assert_eq!(done.file_name, expected);
 }
 
 #[tokio::test]

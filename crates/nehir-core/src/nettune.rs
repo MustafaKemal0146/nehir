@@ -5,7 +5,9 @@
 //! (bkz. `packaging/nehir-nettune`); her şey geri alınabilir.
 
 use serde::Serialize;
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(unix)]
+use std::path::PathBuf;
 
 /// Yardımcı betiğin kurulu yolu (`.deb` ile gelir).
 pub const HELPER_PATH: &str = "/usr/lib/nehir/nehir-nettune";
@@ -37,6 +39,8 @@ pub struct Iface {
 
 #[derive(Debug, Clone, Serialize)]
 pub struct NetReport {
+    /// Bu işletim sisteminde ağ optimizasyonu var mı? Windows'ta `false`: arayüz bölümü gizler.
+    pub supported: bool,
     pub items: Vec<SysctlItem>,
     pub ifaces: Vec<Iface>,
     pub bbr_available: bool,
@@ -144,6 +148,7 @@ pub fn inspect_at(root: &Path, helper: &Path) -> NetReport {
     let ifaces = interfaces(root);
     let tcp_ok = items.iter().all(|i| i.ok);
     NetReport {
+        supported: true,
         bbr_available: bbr,
         vpn_in_route: ifaces.iter().any(|i| i.kind == "vpn" && i.default_route),
         wifi_present: ifaces.iter().any(|i| i.kind == "wifi"),
@@ -156,11 +161,36 @@ pub fn inspect_at(root: &Path, helper: &Path) -> NetReport {
     }
 }
 
+#[cfg(unix)]
 pub fn inspect() -> NetReport {
     inspect_at(Path::new("/"), &PathBuf::from(HELPER_PATH))
 }
 
+/// Windows'ta `/proc/sys` yoktur ve TCP ayarlarını (BBR, tamponlar) elle değiştirmek Windows'un
+/// kendi otomatik ayarını bozabilir; bu yüzden özellik yoktur.
+#[cfg(not(unix))]
+pub fn inspect() -> NetReport {
+    NetReport {
+        supported: false,
+        items: Vec::new(),
+        ifaces: Vec::new(),
+        bbr_available: false,
+        vpn_in_route: false,
+        wifi_present: false,
+        tcp_ok: true,
+        tcp_applied: false,
+        wifi_applied: false,
+        helper_installed: false,
+    }
+}
+
+#[cfg(not(unix))]
+pub fn run_helper(_op: &str, _parts: &[&str]) -> Result<(), String> {
+    Err("unsupported".into())
+}
+
 /// Yardımcıyı `pkexec` ile çalıştırır (yönetici parolası ister). `op`: "apply" | "revert"; `parts`: "tcp", "wifi".
+#[cfg(unix)]
 pub fn run_helper(op: &str, parts: &[&str]) -> Result<(), String> {
     if !matches!(op, "apply" | "revert") || parts.is_empty() || parts.iter().any(|p| !matches!(*p, "tcp" | "wifi")) {
         return Err("geçersiz istek".into());

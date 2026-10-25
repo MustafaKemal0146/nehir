@@ -31,14 +31,12 @@ pub struct VideoOpts {
     pub name_stem: Option<String>,
 }
 
-fn is_exec(p: &Path) -> bool {
-    use std::os::unix::fs::PermissionsExt;
-    p.is_file() && std::fs::metadata(p).map(|m| m.permissions().mode() & 0o111 != 0).unwrap_or(false)
-}
+use crate::platform::{exe_name, is_executable as is_exec};
 
 fn which(name: &str) -> Option<PathBuf> {
+    let name = exe_name(name);
     let path = std::env::var_os("PATH")?;
-    std::env::split_paths(&path).map(|d| d.join(name)).find(|p| is_exec(p))
+    std::env::split_paths(&path).map(|d| d.join(&name)).find(|p| is_exec(p))
 }
 
 pub fn locate_ytdlp(custom: &str, paths: &Paths) -> Option<PathBuf> {
@@ -46,27 +44,30 @@ pub fn locate_ytdlp(custom: &str, paths: &Paths) -> Option<PathBuf> {
     if !custom.is_empty() {
         candidates.push(PathBuf::from(custom));
     }
-    candidates.push(paths.bin_dir().join("yt-dlp"));
-    if let Some(home) = dirs::home_dir() {
-        candidates.push(home.join(".local/bin/yt-dlp"));
+    candidates.push(paths.bin_dir().join(exe_name("yt-dlp")));
+    #[cfg(unix)]
+    {
+        if let Some(home) = dirs::home_dir() {
+            candidates.push(home.join(".local/bin/yt-dlp"));
+        }
+        candidates.push("/usr/local/bin/yt-dlp".into());
+        candidates.push("/usr/bin/yt-dlp".into());
     }
-    candidates.push("/usr/local/bin/yt-dlp".into());
-    candidates.push("/usr/bin/yt-dlp".into());
     candidates.into_iter().find(|p| is_exec(p)).or_else(|| which("yt-dlp"))
 }
 
 pub fn locate_ffmpeg(paths: &Paths) -> Option<PathBuf> {
-    let own = paths.bin_dir().join("ffmpeg");
+    let own = paths.bin_dir().join(exe_name("ffmpeg"));
     if is_exec(&own) { Some(own) } else { which("ffmpeg") }
 }
 
 /// YouTube'un imza/n-challenge'ını çözmek için yt-dlp'nin kullandığı JS çalışma ortamı.
 pub fn locate_deno(paths: &Paths) -> Option<PathBuf> {
-    let own = paths.bin_dir().join("deno");
+    let own = paths.bin_dir().join(exe_name("deno"));
     if is_exec(&own) {
         return Some(own);
     }
-    which("deno").or_else(|| dirs::home_dir().map(|h| h.join(".deno/bin/deno")).filter(|p| is_exec(p)))
+    which("deno").or_else(|| dirs::home_dir().map(|h| h.join(".deno").join("bin").join(exe_name("deno"))).filter(|p| is_exec(p)))
 }
 
 /// Eklentiden gelen çerezleri yt-dlp'nin okuduğu Netscape biçiminde yazar (0600).
@@ -223,8 +224,8 @@ pub async fn run(
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .env("PYTHONIOENCODING", "utf-8")
-        .kill_on_drop(true)
-        .process_group(0);
+        .kill_on_drop(true);
+    crate::platform::isolate_command(&mut cmd);
     let mut path_env = vec![paths.bin_dir()];
     if let Some(p) = std::env::var_os("PATH") {
         path_env.extend(std::env::split_paths(&p));
@@ -234,7 +235,7 @@ pub async fn run(
     }
 
     let mut child = cmd.spawn().map_err(|e| format!("yt-dlp başlatılamadı: {e}"))?;
-    let pid = child.id();
+    let tree = crate::platform::ProcessTree::attach(&child);
     let mut out = BufReader::new(child.stdout.take().unwrap()).lines();
     let mut err = BufReader::new(child.stderr.take().unwrap()).lines();
     let mut final_path: Option<PathBuf> = None;
@@ -249,7 +250,7 @@ pub async fn run(
         let drain_deadline = drain_until;
         tokio::select! {
             _ = cancel.cancelled() => {
-                kill_group(pid);
+                tree.kill();
                 let _ = child.wait().await;
                 return Ok(None);
             }
@@ -262,7 +263,7 @@ pub async fn run(
                 Ok(Some(l)) => {
                     let l = l.trim().to_string();
                     if let Some(p) = parse_progress(&l) { on_progress(p); }
-                    else if l.starts_with('/') && Path::new(&l).exists() { final_path = Some(PathBuf::from(&l)); }
+                    else if Path::new(&l).is_absolute() && Path::new(&l).exists() { final_path = Some(PathBuf::from(&l)); }
                     else if let Some(st) = stage_for(&l) { on_stage(st); }
                 }
                 _ => out_open = false,
@@ -282,7 +283,7 @@ pub async fn run(
         }
     }
     // Geride kalan alt süreçleri (deno vb.) temizle.
-    kill_group(pid);
+    tree.kill();
     let status = match exit_status {
         Some(s) => s,
         None => child.wait().await.map_err(|e| e.to_string())?,
@@ -294,35 +295,37 @@ pub async fn run(
     }
 }
 
-fn kill_group(pid: Option<u32>) {
-    if let Some(pid) = pid {
-        unsafe {
-            libc::kill(-(pid as i32), libc::SIGTERM);
-        }
-    }
-}
-
 async fn download_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
     let r = client.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
     r.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
 }
 
 async fn install_binary(paths: &Paths, name: &str, data: Vec<u8>) -> Result<PathBuf, String> {
-    use std::os::unix::fs::PermissionsExt;
     let dir = paths.bin_dir();
     tokio::fs::create_dir_all(&dir).await.map_err(|e| e.to_string())?;
-    let target = dir.join(name);
-    let tmp = dir.join(format!("{name}.tmp"));
+    let file = exe_name(name);
+    let target = dir.join(&file);
+    let tmp = dir.join(format!("{file}.tmp"));
     tokio::fs::write(&tmp, &data).await.map_err(|e| e.to_string())?;
-    tokio::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o755)).await.map_err(|e| e.to_string())?;
+    crate::platform::set_unix_mode(&tmp, 0o755).map_err(|e| e.to_string())?;
     tokio::fs::rename(&tmp, &target).await.map_err(|e| e.to_string())?;
     Ok(target)
 }
 
-/// yt-dlp'nin bağımsız Linux ikilisini kullanıcı dizinine indirir (kullanıcı isteğiyle).
-/// YouTube için gereken `deno` JS çalışma ortamı da (yoksa) birlikte kurulur.
+#[cfg(windows)]
+const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp.exe";
+#[cfg(not(windows))]
+const YTDLP_URL: &str = "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux";
+
+#[cfg(windows)]
+const DENO_URL: &str = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-pc-windows-msvc.zip";
+#[cfg(not(windows))]
+const DENO_URL: &str = "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip";
+
+/// yt-dlp'nin bağımsız ikilisini (Linux'ta `yt-dlp_linux`, Windows'ta `yt-dlp.exe`) kullanıcı dizinine
+/// indirir (kullanıcı isteğiyle). YouTube için gereken `deno` JS çalışma ortamı da (yoksa) birlikte kurulur.
 pub async fn install_ytdlp(client: &reqwest::Client, paths: &Paths) -> Result<PathBuf, String> {
-    let bytes = download_bytes(client, "https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux").await?;
+    let bytes = download_bytes(client, YTDLP_URL).await?;
     if bytes.len() < 1_000_000 {
         return Err("İndirilen yt-dlp beklenenden küçük".into());
     }
@@ -333,25 +336,57 @@ pub async fn install_ytdlp(client: &reqwest::Client, paths: &Paths) -> Result<Pa
             tracing::warn!("deno kurulamadı: {e}");
         }
     }
+    #[cfg(windows)]
+    if locate_ffmpeg(paths).is_none() {
+        // ffmpeg olmadan yt-dlp yalnızca tek dosyalı (düşük çözünürlüklü) biçimleri indirebilir; yine de engel olmasın.
+        if let Err(e) = install_ffmpeg(client, paths).await {
+            tracing::warn!("ffmpeg kurulamadı: {e}");
+        }
+    }
     Ok(target)
 }
 
-async fn install_deno(client: &reqwest::Client, paths: &Paths) -> Result<(), String> {
+/// Zip içinden, yolu `suffix` ile biten ilk dosyanın içeriğini okur (ör. `bin/ffmpeg.exe` → `…/bin/ffmpeg.exe`).
+/// Dizin adındaki sürüm/derleme etiketi değiştiği için tam yol yerine sonek aranır.
+fn read_zip_entry(zip_bytes: &[u8], suffix: &str) -> Result<Vec<u8>, String> {
     use std::io::Read;
-    let zip_bytes = download_bytes(client, "https://github.com/denoland/deno/releases/latest/download/deno-x86_64-unknown-linux-gnu.zip").await?;
-    let bin = tokio::task::spawn_blocking(move || -> Result<Vec<u8>, String> {
-        let mut z = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(|e| e.to_string())?;
-        let mut f = z.by_name("deno").map_err(|e| e.to_string())?;
-        let mut out = Vec::new();
-        f.read_to_end(&mut out).map_err(|e| e.to_string())?;
-        Ok(out)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
+    let mut z = zip::ZipArchive::new(std::io::Cursor::new(zip_bytes)).map_err(|e| e.to_string())?;
+    let idx = (0..z.len())
+        .find(|&i| z.name_for_index(i).map(|n| n == suffix || n.ends_with(&format!("/{suffix}"))).unwrap_or(false))
+        .ok_or_else(|| format!("zip içinde {suffix} yok"))?;
+    let mut f = z.by_index(idx).map_err(|e| e.to_string())?;
+    let mut out = Vec::new();
+    f.read_to_end(&mut out).map_err(|e| e.to_string())?;
+    Ok(out)
+}
+
+async fn install_deno(client: &reqwest::Client, paths: &Paths) -> Result<(), String> {
+    let zip_bytes = download_bytes(client, DENO_URL).await?;
+    let name = exe_name("deno");
+    let bin = tokio::task::spawn_blocking(move || read_zip_entry(&zip_bytes, &name)).await.map_err(|e| e.to_string())??;
     if bin.len() < 1_000_000 {
         return Err("deno beklenenden küçük".into());
     }
     install_binary(paths, "deno", bin).await.map(|_| ())
+}
+
+/// Windows: yt-dlp'nin önerdiği ffmpeg derlemesi. Linux'ta ffmpeg'i paket yöneticisi sağlar (`apt install ffmpeg`);
+/// Windows'ta yoktur ve ffmpeg olmadan ses/görüntü birleştirilemez (yalnızca düşük çözünürlük iner).
+#[cfg(windows)]
+const FFMPEG_URL: &str = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
+
+#[cfg(windows)]
+async fn install_ffmpeg(client: &reqwest::Client, paths: &Paths) -> Result<(), String> {
+    let zip_bytes = download_bytes(client, FFMPEG_URL).await?;
+    for name in ["ffmpeg", "ffprobe"] {
+        let (zb, entry) = (zip_bytes.clone(), format!("bin/{}", exe_name(name)));
+        let bin = tokio::task::spawn_blocking(move || read_zip_entry(&zb, &entry)).await.map_err(|e| e.to_string())??;
+        if bin.len() < 1_000_000 {
+            return Err(format!("{name} beklenenden küçük"));
+        }
+        install_binary(paths, name, bin).await?;
+    }
+    Ok(())
 }
 
 /// yt-dlp hatası ağ kaynaklı ve sonra düzelebilir mi? (Desteklenmeyen adres, 4xx, giriş/DRM gibi kalıcı hatalar değil.)
@@ -438,8 +473,11 @@ pub async fn list_formats(
     args.push("--".into());
     args.push(url.to_string());
     let mut cmd = Command::new(ytdlp);
-    cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).process_group(0).env("PYTHONIOENCODING", "utf-8");
+    cmd.args(&args).stdin(Stdio::null()).stdout(Stdio::piped()).stderr(Stdio::piped()).kill_on_drop(true).env("PYTHONIOENCODING", "utf-8");
+    crate::platform::isolate_command(&mut cmd);
     let child = cmd.spawn().map_err(|e| format!("yt-dlp başlatılamadı: {e}"))?;
+    // Zaman aşımında future düşünce iş de kapanır; yt-dlp'nin alt süreçleri arkada kalmaz.
+    let _tree = crate::platform::ProcessTree::attach(&child);
     let out = tokio::time::timeout(std::time::Duration::from_secs(30), child.wait_with_output())
         .await
         .map_err(|_| "zaman aşımı".to_string())?
@@ -486,6 +524,32 @@ mod tests {
         assert_eq!(l.options[0].size, Some(61_000_000)); // en büyük 1080p + ses
         assert_eq!(l.options[1].size, Some(21_000_000));
         assert_eq!(l.options[2].size, Some(5_000_000)); // sesli biçim: ek ses yok
+    }
+
+    fn zip_with(entries: &[(&str, &[u8])]) -> Vec<u8> {
+        use std::io::Write;
+        let mut w = zip::ZipWriter::new(std::io::Cursor::new(Vec::new()));
+        for (name, data) in entries {
+            w.start_file(*name, zip::write::SimpleFileOptions::default()).unwrap();
+            w.write_all(data).unwrap();
+        }
+        w.finish().unwrap().into_inner()
+    }
+
+    #[test]
+    fn finds_zip_entry_by_path_suffix() {
+        let z = zip_with(&[
+            ("ffmpeg-master-latest-win64-gpl/doc/readme.txt", b"doc"),
+            ("ffmpeg-master-latest-win64-gpl/xbin/ffmpeg.exe", b"WRONG"),
+            ("ffmpeg-master-latest-win64-gpl/bin/ffmpeg.exe", b"RIGHT"),
+            ("deno.exe", b"DENO"),
+        ]);
+        // Sürüm dizininin adı ne olursa olsun `bin/ffmpeg.exe` bulunur; `xbin/` ile karışmaz.
+        assert_eq!(read_zip_entry(&z, "bin/ffmpeg.exe").unwrap(), b"RIGHT");
+        // Kökteki dosya (deno zip'i) tam adla bulunur.
+        assert_eq!(read_zip_entry(&z, "deno.exe").unwrap(), b"DENO");
+        assert!(read_zip_entry(&z, "bin/ffprobe.exe").is_err());
+        assert!(read_zip_entry(b"not a zip", "x").is_err());
     }
 
     #[test]

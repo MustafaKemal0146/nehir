@@ -2,6 +2,25 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme [SemVer](https://semver.org/lang/tr/).
 
+## [Yayınlanmadı]
+
+### Eklendi
+- **Windows 10/11 desteği** (aynı kod tabanı, `cfg` ile). İşletim sistemine bağlı her şey `nehir-core/src/platform.rs` içinde toplandı (konumlu yazma, yer ayırma, boş alan, süreç ağacı, dosya açma, uyut/kapat, otomatik başlatma, dil).
+- Windows'ta alt süreçlerin (yt-dlp → deno, ffmpeg) iptalde birlikte sonlandırılması için **Job Object**.
+- Windows native messaging: manifestler ve her tarayıcı (Chrome, Edge, Brave, Chromium, Firefox) için `HKCU` kayıt defteri anahtarları; `nehir-native-host.exe` konsol penceresi açmadan ve ayrık başlatır.
+- Windows'ta `yt-dlp.exe`, `deno.exe` ve `ffmpeg.exe` kurulumu (ses/görüntü birleştirme için ffmpeg gerekir).
+- İndirilen dosyalara Windows'ta **Mark-of-the-Web** (`Zone.Identifier`): SmartScreen/Defender uyarısı tarayıcı indirmeleri gibi korunur.
+- Windows dosya adı kuralları: yasak karakterler, ayrılmış adlar (`CON`, `NUL`, `COM1`…), sondaki nokta/boşluk.
+- NSIS kurulum paketi (`packaging/windows/`), CI'de Windows işi.
+
+### Değişti
+- Windows'ta ağ optimizasyonu yoktur (`NetReport.supported`); arayüz düğmeyi gizler.
+- Windows'ta veri klasörü LocalAppData'dır (Roaming değil).
+
+### Düzeltildi
+- İlk açılış sihirbazındaki logo yayın sürümünde yüklenmiyordu (`/src/logo.png` JS içinde Vite tarafından işlenmez).
+- `extension/build.mjs`, Node 24'te Windows'ta yolda ASCII olmayan karakter varsa (`fs.cpSync` hatası) çöküyordu.
+
 ## [1.1.0]: 2026-10-15
 
 ### Eklendi

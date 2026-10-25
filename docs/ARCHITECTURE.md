@@ -83,15 +83,38 @@ yt-dlp süreci ayrı bir süreç grubunda çalıştırılır; çıkışı doğru
 - **Disk:** parça planı varsa dosya `fallocate` ile baştan ayrılır; probe sonrası `statvfs` ile boş yer denetlenir (`disk_full:<gereken>:<boş>` hatası).
 - **Doğrulama** (`checksum.rs`): MD5 / SHA-1 / SHA-256 / SHA-512; beklenen özet varsa dosya tamamlanınca `Processing` + `stage=verifying` aşamasında hesaplanır. Eklenti özeti sayfadan ya da `SHA256SUMS` bağlantısından bulur.
 
+## Platform katmanı (`platform.rs`)
+
+İşletim sistemine bağlı her şey `nehir-core/src/platform.rs` içindedir; çağıran kod `cfg` görmez. Linux ve Windows kolları aynı imzayı taşır.
+
+| İş | Linux | Windows |
+|---|---|---|
+| Konumlu yazma (`write_all_at`) | `pwrite` | `seek_write` (imleç kullanılmaz) |
+| Yer ayırma ve boş alan | `fallocate`, `statvfs` | `SetEndOfFile` (`set_len`), `GetDiskFreeSpaceExW` (kota dahil) |
+| Süreç ağacı (`ProcessTree`) | süreç grubu, `kill(-pid)` | **Job Object** (`KILL_ON_JOB_CLOSE`); yt-dlp → deno/ffmpeg birlikte ölür |
+| Dosya/klasör açma | `xdg-open` | `explorer.exe` (`/select,` ile dosyayı seçili gösterir) |
+| Uyut / kapat | `systemctl` | `SetSuspendState(false,…)` / `shutdown /s /t 0` |
+| Otomatik başlatma | `~/.config/autostart/*.desktop` | `HKCU\…\Run` |
+| Native messaging | tarayıcı klasörlerine manifest | manifest + her tarayıcı için kayıt defteri anahtarı |
+| Mark-of-the-Web | — | `dosya:Zone.Identifier` (ZoneId=3, HostUrl, ReferrerUrl) |
+| Gizli çalışma klasörü | baştaki nokta | nokta + `FILE_ATTRIBUTE_HIDDEN` |
+| Dosya adı kuralları | yol ayracı, kontrol karakteri | + `< > : " \| ? *`, ayrılmış adlar, sondaki nokta/boşluk |
+| Sistem dili | `LC_*` / `LANG` | `GetUserDefaultUILanguage`, `GetUserDefaultLocaleName` |
+| Ağ optimizasyonu | `nettune` | yok (`NetReport.supported = false`; arayüz düğmeyi gizler) |
+
+Windows'ta `nehir-native-host.exe`, `nehir.exe`'nin yanında durur (NSIS kurulumunda `externalBin`). Kurulum dizini: `%LOCALAPPDATA%\Nehir\`.
+
 ## Veri konumları
 
-| Ne | Nerede |
-|---|---|
-| Ayarlar | `~/.config/nehir/settings.json` |
-| İndirme kayıtları | `~/.local/share/nehir/downloads.json` |
-| yt-dlp, deno | `~/.local/share/nehir/bin/` |
-| Ağ ayarı yedeği (uygulanırsa) | `/var/lib/nehir/nettune-backup.conf` |
-| Native messaging manifestleri | tarayıcıların `NativeMessagingHosts/` klasörleri (uygulama açılışta yazar) ve `.deb` ile `/etc/...` |
+| Ne | Linux | Windows |
+|---|---|---|
+| Ayarlar | `~/.config/nehir/settings.json` | `%APPDATA%\nehir\settings.json` |
+| İndirme kayıtları | `~/.local/share/nehir/downloads.json` | `%LOCALAPPDATA%\nehir\downloads.json` |
+| yt-dlp, deno, ffmpeg | `~/.local/share/nehir/bin/` | `%LOCALAPPDATA%\nehir\bin\` |
+| Ağ ayarı yedeği (uygulanırsa) | `/var/lib/nehir/nettune-backup.conf` | — |
+| Native messaging manifestleri | tarayıcıların `NativeMessagingHosts/` klasörleri (uygulama açılışta yazar) ve `.deb` ile `/etc/...` | `%LOCALAPPDATA%\nehir\native-messaging\` + `HKCU\Software\{Google\Chrome, Microsoft\Edge, BraveSoftware\Brave-Browser, Chromium, Mozilla}\NativeMessagingHosts\org.nehir.host` |
+
+Windows'ta veri klasörü Roaming değil **LocalAppData**'dır: yt-dlp/deno/ffmpeg yüzlerce MB tutar ve makineye özgüdür, kurumsal profil eşitlemesine girmemeli.
 
 ## Testler
 

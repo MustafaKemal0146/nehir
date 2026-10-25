@@ -6,13 +6,13 @@
 
 ### *Damla damla değil, nehir gibi.*
 
-**Linux için hızlı, çok bağlantılı indirme yöneticisi: IDM'in Linux karşılığı.**
+**Linux ve Windows için hızlı, çok bağlantılı indirme yöneticisi: IDM'in Linux karşılığı.**
 
 Tarayıcıdaki indirmeleri ve videoları yakalar, 32'ye kadar paralel bağlantıyla indirir; YouTube dahil 1000'den fazla siteden video ve müzik çeker.
 
 [![Sürüm](https://img.shields.io/github/v/release/MustafaKemal0146/nehir?style=for-the-badge&color=1f6feb&label=s%C3%BCr%C3%BCm)](https://github.com/MustafaKemal0146/nehir/releases/latest)
 [![Lisans: MIT](https://img.shields.io/badge/lisans-MIT-2ea043?style=for-the-badge)](LICENSE)
-[![Platform: Linux](https://img.shields.io/badge/platform-Linux-fcc624?style=for-the-badge&logo=linux&logoColor=black)](#-kurulum)
+[![Platform: Linux · Windows](https://img.shields.io/badge/platform-Linux%20%C2%B7%20Windows-fcc624?style=for-the-badge&logo=linux&logoColor=black)](#-kurulum)
 [![Rust](https://img.shields.io/badge/Rust-%23000000?style=for-the-badge&logo=rust&logoColor=white)](https://www.rust-lang.org)
 [![Tauri 2](https://img.shields.io/badge/Tauri-2-24C8DB?style=for-the-badge&logo=tauri&logoColor=white)](https://tauri.app)
 
@@ -144,9 +144,40 @@ Ayrıntılar: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
 - Yalnızca `chrome-extension://` / `moz-extension://` kökenli istekler (ya da eklentinin özel başlığını taşıyanlar) kabul edilir; **sıradan web siteleri uygulamayı yönlendiremez**. `Host` başlığı da doğrulanır (DNS rebinding'e karşı).
 - Eklenti, indirmenin **kaydedileceği klasörü seçemez**; hedefi yalnızca uygulama belirler.
 - Çerezler yalnızca ilgili indirme için kullanılır ve aynı sunucudan başka bir sunucuya yönlendirmede gönderilmez.
-- Kullanıcı verisi (ayarlar, kayıtlar) `0600` izinleriyle yazılır.
+- Kullanıcı verisi (ayarlar, kayıtlar) Linux'ta `0600` izinleriyle yazılır; Windows'ta kullanıcı profili zaten yalnızca sahibine açıktır.
 
 Bir güvenlik sorunu bulursan lütfen herkese açık issue yerine [SECURITY.md](SECURITY.md)'deki yolu izle.
+
+## 🪟 Windows
+
+Windows 10/11 için aynı kod tabanından derlenir. Tarayıcıdaki indirmeleri yakalama, çok bağlantılı indirme, video/MP3 (yt-dlp), kuyruk, hız sınırı, tepsi, otomatik başlatma ve "bitince uyut/kapat" çalışır. Linux'tan farkları:
+
+| | Windows'ta |
+|---|---|
+| **Kurulum** | [Releases](https://github.com/MustafaKemal0146/nehir/releases/latest) sayfasından `Nehir_<sürüm>_x64-setup.exe`'yi indirip çalıştır (≈5 MB). Kullanıcı başına kurulur (`%LOCALAPPDATA%\Nehir`, yönetici yetkisi gerekmez), Başlat menüsüne eklenir, WebView2 yoksa yükler. Kaldırınca tarayıcı kayıtları ve "Windows ile başlat" girdisi de silinir. Sessiz kurulum: `Nehir_…-setup.exe /S`. |
+| **Native messaging** | Manifestler `%LOCALAPPDATA%\nehir\native-messaging\` altına yazılır; Chrome, Edge, Brave, Chromium ve Firefox için `HKCU\Software\…\NativeMessagingHosts\org.nehir.host` kayıt defteri anahtarları bunlara yöneltilir. Vivaldi ve Opera, Chrome'un anahtarını okur. |
+| **`yt-dlp`, `deno`, `ffmpeg`** | **Ayarlar → Video → yt-dlp'yi kur** üçünü de `%LOCALAPPDATA%\nehir\bin\` altına kurar (`ffmpeg` olmadan ses ve görüntü birleştirilemez, yalnızca düşük çözünürlük iner). |
+| **Verilerin yeri** | Ayarlar `%APPDATA%\nehir\`, indirme kayıtları ve ikililer `%LOCALAPPDATA%\nehir\`. |
+| **İnternetten geldi işareti** | Tamamlanan dosyalara tarayıcılardaki gibi `Zone.Identifier` (Mark-of-the-Web) yazılır; böylece `.exe`/`.msi` dosyalarında SmartScreen ve Defender uyarısı korunur. |
+| **Dosya adları** | Windows'un yasak karakterleri (`< > : " \| ? *`), ayrılmış adlar (`CON`, `NUL`, `COM1`…) ve sondaki nokta/boşluk temizlenir. `Güzel: Video` → `Güzel - Video`. |
+| **Ağ optimizasyonu** | Yok (BBR, `/proc/sys` ve polkit Linux'a özgü); Windows'ta düğme gizlenir. |
+| **Bildirimler** | Düğmesiz (Aç/Klasörü göster/Tekrar dene düğmeleri yalnızca Linux'ta). |
+| **Chrome eklentisi** | `…\Nehir\extension\chrome` klasörü; `chrome://extensions` → Geliştirici modu → *Paketlenmemiş öğe yükle*. |
+
+Windows'ta kaynaktan derleme (PowerShell; Rust MSVC, Node.js 20+ ve Visual Studio Build Tools "C++ ile masaüstü geliştirme" gerekir):
+
+```powershell
+git clone https://github.com/MustafaKemal0146/nehir; cd nehir
+cargo test -p nehir-core -p nehir-host -p nehir-daemon
+# Gerçek ağ ve araçlarla uçtan uca deneme (yt-dlp/deno/ffmpeg kurar, ~200 MB indirir):
+cargo test -p nehir-core --test windows_tools -- --ignored --nocapture
+(cd ui; npm ci; npm run build)
+node extension/build.mjs
+cargo run -p nehir-app
+
+# Kurulum paketi (NSIS): önce `cargo install tauri-cli --version "^2" --locked`
+packaging/windows/build.ps1             # → target\release\bundle\nsis\Nehir_<sürüm>_x64-setup.exe
+```
 
 ## 🛠️ Kaynaktan derleme
 

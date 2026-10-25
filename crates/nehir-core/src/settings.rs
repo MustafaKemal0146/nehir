@@ -128,13 +128,13 @@ impl Settings {
 
 /// Yarı yazılmış dosya bırakmamak için geçici dosyaya yazıp yeniden adlandırır.
 pub fn write_atomic(path: &Path, data: &[u8], mode: u32) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt;
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir)?;
     }
     let tmp = path.with_extension("tmp");
     std::fs::write(&tmp, data)?;
-    std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(mode))?;
+    crate::platform::set_unix_mode(&tmp, mode)?;
+    // Windows'ta `rename` hedef varsa üzerine yazar (MOVEFILE_REPLACE_EXISTING).
     std::fs::rename(&tmp, path)
 }
 
@@ -146,9 +146,15 @@ pub struct Paths {
 
 impl Paths {
     pub fn default_dirs() -> Paths {
+        // Windows'ta `data_dir()` Roaming'dir ve kurumsal profillerde ağ üzerinden eşitlenir; yt-dlp/deno
+        // gibi yüzlerce MB'lık ikililer ve indirme listesi makineye özgüdür, bu yüzden LocalAppData kullanılır.
+        #[cfg(windows)]
+        let data = dirs::data_local_dir();
+        #[cfg(not(windows))]
+        let data = dirs::data_dir();
         Paths {
             config_dir: dirs::config_dir().unwrap_or_else(|| PathBuf::from(".")).join("nehir"),
-            data_dir: dirs::data_dir().unwrap_or_else(|| PathBuf::from(".")).join("nehir"),
+            data_dir: data.unwrap_or_else(|| PathBuf::from(".")).join("nehir"),
         }
     }
     pub fn settings_file(&self) -> PathBuf {

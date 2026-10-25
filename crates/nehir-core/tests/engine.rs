@@ -400,7 +400,11 @@ async fn file_space_is_reserved_up_front() {
     .unwrap();
     assert_eq!(out, Outcome::Completed);
     assert_eq!(*seen_len.lock().unwrap(), total);
-    // Blokları gerçekten ayrılmış (seyrek dosya değil).
-    use std::os::unix::fs::MetadataExt;
-    assert!(std::fs::metadata(&part).unwrap().blocks() * 512 >= total);
+    // Blokları gerçekten ayrılmış (seyrek dosya değil). Windows'ta blok sayısı okunamaz; yukarıdaki
+    // boyut denetimi ve `set_len` yeterlidir.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        assert!(std::fs::metadata(&part).unwrap().blocks() * 512 >= total);
+    }
 }

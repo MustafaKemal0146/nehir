@@ -8,15 +8,13 @@
 //! * Parça durumu her ilerleme bildiriminde dışarı verilir; çağıran bunu diske yazarak devam etmeyi sağlar.
 //! * "Otomatik" protokolde HTTP/1.1 ile çok bağlantı açılır. Sunucu bağlantı sayısını sınırlarsa (429/503)
 //!   bağlantı kapatmak yerine önce HTTP/2'ye geçilir: parçalar tek bağlantıda ayrı akışlar olarak sürer.
-//! * Dosyanın yeri baştan ayrılır (`fallocate`): parçalanma azalır, yer yetmezse indirme başında anlaşılır.
+//! * Dosyanın yeri baştan ayrılır (Linux'ta `fallocate`, Windows'ta `SetEndOfFile`): parçalanma azalır, yer yetmezse indirme başında anlaşılır.
 
 use crate::model::Segment;
 use futures_util::StreamExt;
 use reqwest::{header, Client, StatusCode};
 use std::collections::VecDeque;
 use std::fs::{File, OpenOptions};
-use std::os::fd::AsRawFd;
-use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, AtomicU8, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
@@ -179,31 +177,18 @@ pub fn disk_full_error(needed: u64, free: u64) -> EngineError {
 
 /// Klasörün bulunduğu diskte kullanılabilir boş yer (bayt).
 pub fn free_space(dir: &std::path::Path) -> Option<u64> {
-    use std::os::unix::ffi::OsStrExt;
-    let c = std::ffi::CString::new(dir.as_os_str().as_bytes()).ok()?;
-    let mut st: libc::statvfs = unsafe { std::mem::zeroed() };
-    if unsafe { libc::statvfs(c.as_ptr(), &mut st) } != 0 {
-        return None;
-    }
-    Some(st.f_bavail as u64 * st.f_frsize as u64)
+    crate::platform::free_space(dir)
 }
 
 /// Dosyanın tüm yerini baştan ayırır. Dosya sistemi desteklemiyorsa boyutu ayarlamakla yetinir;
 /// yer yetmezse anlaşılır bir hata döner.
 fn preallocate(f: &File, total: u64) -> Result<(), EngineError> {
-    if total == 0 {
-        return Ok(());
+    use crate::platform::PreallocError;
+    match crate::platform::preallocate(f, total) {
+        Ok(()) => Ok(()),
+        Err(PreallocError::NoSpace) => Err(disk_full_error(total, 0)),
+        Err(PreallocError::Io(e)) => Err(e.into()),
     }
-    let r = unsafe { libc::fallocate(f.as_raw_fd(), 0, 0, total as libc::off_t) };
-    if r == 0 {
-        return Ok(());
-    }
-    let e = std::io::Error::last_os_error();
-    if e.raw_os_error() == Some(libc::ENOSPC) {
-        return Err(disk_full_error(total, 0));
-    }
-    f.set_len(total)?;
-    Ok(())
 }
 
 fn apply_headers(mut rb: reqwest::RequestBuilder, headers: &[(String, String)]) -> reqwest::RequestBuilder {
@@ -582,7 +567,7 @@ async fn flush(shared: &Shared, idx: usize, buf: &mut Vec<u8>) -> Result<bool, E
     data.truncate(n);
     if n > 0 {
         let file = shared.file.clone();
-        tokio::task::spawn_blocking(move || file.write_all_at(&data, offset))
+        tokio::task::spawn_blocking(move || crate::platform::write_all_at(&file, &data, offset))
             .await
             .map_err(|e| EngineError::Msg(e.to_string()))??;
     }
@@ -617,7 +602,7 @@ async fn run_single(
                 let len = data.len() as u64;
                 let f = file.clone();
                 let off = received;
-                tokio::task::spawn_blocking(move || f.write_all_at(&data, off))
+                tokio::task::spawn_blocking(move || crate::platform::write_all_at(&f, &data, off))
                     .await
                     .map_err(|e| EngineError::Msg(e.to_string()))??;
                 received += len;

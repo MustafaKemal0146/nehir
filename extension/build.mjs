@@ -1,9 +1,20 @@
 // Eklentiyi dist/chrome ve dist/firefox klasörlerine derler (+ isteğe bağlı zip).
 // Kullanım: node build.mjs [--zip]
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync, existsSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
+
+// `fs.cpSync(..., { recursive: true })` kullanılmaz: Node 24'te Windows'ta yolda ASCII olmayan karakter
+// (ör. "Kişisel Projeler") varsa süreç çöküyor (0xC0000409). Küçük bir özyinelemeli kopyalama her yerde çalışır.
+function copyTree(from, to) {
+  if (statSync(from).isDirectory()) {
+    mkdirSync(to, { recursive: true });
+    for (const name of readdirSync(from)) copyTree(join(from, name), join(to, name));
+  } else {
+    copyFileSync(from, to);
+  }
+}
 
 const root = dirname(fileURLToPath(import.meta.url));
 const src = join(root, 'src');
@@ -24,7 +35,7 @@ for (const target of ['chrome', 'firefox']) {
   const out = join(dist, target);
   mkdirSync(out, { recursive: true });
   for (const f of ['i18n.js', 'background.js', 'content.js', 'popup.html', 'popup.js', 'popup.css', 'icons', '_locales']) {
-    cpSync(join(src, f), join(out, f), { recursive: true });
+    copyTree(join(src, f), join(out, f));
   }
   const m = structuredClone(base);
   m.version = VERSION;

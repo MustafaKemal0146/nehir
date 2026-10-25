@@ -50,7 +50,8 @@ pub fn file_name_from_url(url: &str) -> Option<String> {
     if name.is_empty() { None } else { Some(name) }
 }
 
-/// Yol ayracı, kontrol karakteri ve Linux'ta sorun çıkaran karakterleri temizler.
+/// Yol ayracı, kontrol karakteri ve dosya sisteminde sorun çıkaran karakterleri temizler.
+/// Windows'ta ayrıca o sistemin yasak karakter ve ad kuralları uygulanır.
 pub fn sanitize_file_name(name: &str) -> String {
     let base = name.rsplit(['/', '\\']).next().unwrap_or(name);
     let cleaned: String = base
@@ -58,6 +59,7 @@ pub fn sanitize_file_name(name: &str) -> String {
         .map(|c| if c.is_control() || c == '\0' { '_' } else { c })
         .collect();
     let cleaned = cleaned.trim().trim_start_matches('.').to_string();
+    let cleaned = if cfg!(windows) { windows_safe_name(&cleaned) } else { cleaned };
     // Dosya sistemi sınırı 255 bayt: uzantıyı koruyarak kısalt.
     if cleaned.len() <= 200 {
         return cleaned;
@@ -71,6 +73,31 @@ pub fn sanitize_file_name(name: &str) -> String {
         cut -= 1;
     }
     format!("{}{}", &stem[..cut], ext)
+}
+
+/// Windows dosya adı kuralları (her platformda derlenir ki Linux'ta da sınanabilsin):
+/// * `< > : " | ? *` kullanılamaz. `:` okunur kalsın diye `" - "`/`"-"` olur, diğerleri `_`/`'`.
+/// * Ad nokta ya da boşlukla bitemez.
+/// * `CON`, `PRN`, `AUX`, `NUL`, `COM1`–`COM9`, `LPT1`–`LPT9` uzantılı da olsa ayrılmış addır.
+pub fn windows_safe_name(name: &str) -> String {
+    let s = name.replace(": ", " - ");
+    let s: String = s
+        .chars()
+        .map(|c| match c {
+            ':' => '-',
+            '"' => '\'',
+            '<' | '>' | '|' | '?' | '*' => '_',
+            c => c,
+        })
+        .collect();
+    let s = s.trim_end_matches(['.', ' ']).to_string();
+    let stem = s.split('.').next().unwrap_or("").trim_end();
+    let reserved = {
+        let u = stem.to_ascii_uppercase();
+        matches!(u.as_str(), "CON" | "PRN" | "AUX" | "NUL")
+            || ((u.starts_with("COM") || u.starts_with("LPT")) && u.len() == 4 && u.as_bytes()[3].is_ascii_digit() && u.as_bytes()[3] != b'0')
+    };
+    if reserved { format!("_{s}") } else { s }
 }
 
 /// Sayfa/video başlığını dosya adına çevirir. `sanitize_file_name`'den farkı: `/` ve `\` yol ayracı
@@ -121,7 +148,7 @@ pub fn clean_video_name(name: &str) -> String {
 /// Bilgisayarın dili: "tr" ya da "en". LC_ALL → LC_MESSAGES → LANGUAGE → LANG sırasıyla bakılır;
 /// Türkçe değilse İngilizce kabul edilir.
 pub fn system_language() -> &'static str {
-    detect_language(|k| std::env::var(k).ok())
+    detect_language(crate::platform::locale_var)
 }
 
 /// Dil algılama (test edilebilsin diye ortam değişkenleri dışarıdan verilir).
@@ -193,6 +220,22 @@ mod tests {
     }
 
     #[test]
+    fn windows_names_are_made_safe() {
+        assert_eq!(windows_safe_name("Güzel: Bir-Video.mp4"), "Güzel - Bir-Video.mp4");
+        assert_eq!(windows_safe_name("12:30 raporu.pdf"), "12-30 raporu.pdf");
+        assert_eq!(windows_safe_name("a<b>c|d?e*f\"g.txt"), "a_b_c_d_e_f'g.txt");
+        assert_eq!(windows_safe_name("rapor.txt. ."), "rapor.txt");
+        assert_eq!(windows_safe_name("CON"), "_CON");
+        assert_eq!(windows_safe_name("nul.txt"), "_nul.txt");
+        assert_eq!(windows_safe_name("com3.log"), "_com3.log");
+        assert_eq!(windows_safe_name("LPT9"), "_LPT9");
+        // Ayrılmış değiller:
+        assert_eq!(windows_safe_name("COM0.txt"), "COM0.txt");
+        assert_eq!(windows_safe_name("console.txt"), "console.txt");
+        assert_eq!(windows_safe_name("nullable"), "nullable");
+    }
+
+    #[test]
     fn video_names_are_cleaned() {
         assert_eq!(clean_video_name("＂SARAÇHANE＂ ｜ Yunus'un Odası [9DsZySPCLL0].mp4"), "SARAÇHANE - Yunus'un Odası.mp4");
         assert_eq!(clean_video_name("Küsmek ｜ CM101MMXI FUNDAMENTALS [mIX0XgAbc].mp4"), "Küsmek - CM101MMXI FUNDAMENTALS.mp4");
@@ -214,7 +257,7 @@ mod tests {
 
     #[test]
     fn titles_keep_text_around_slashes() {
-        assert_eq!(sanitize_title("Güzel: Bir/Video"), "Güzel: Bir-Video");
+        assert_eq!(sanitize_title("Güzel: Bir/Video"), if cfg!(windows) { "Güzel - Bir-Video" } else { "Güzel: Bir-Video" });
         assert_eq!(sanitize_title("a\\b"), "a-b");
     }
 

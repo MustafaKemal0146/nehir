@@ -7,7 +7,6 @@
 
 use serde_json::{json, Value};
 use std::io::{Read, Write};
-use std::os::unix::process::CommandExt;
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 
@@ -37,31 +36,64 @@ fn app_candidates() -> Vec<PathBuf> {
     }
     if let Ok(exe) = std::env::current_exe().and_then(|p| p.canonicalize()) {
         if let Some(dir) = exe.parent() {
-            c.push(dir.join("nehir"));
+            c.push(dir.join(if cfg!(windows) { "nehir.exe" } else { "nehir" }));
         }
     }
-    c.push("/usr/bin/nehir".into());
-    c.push("/opt/nehir/nehir".into());
+    #[cfg(unix)]
+    {
+        c.push("/usr/bin/nehir".into());
+        c.push("/opt/nehir/nehir".into());
+    }
+    #[cfg(windows)]
+    {
+        for var in ["LOCALAPPDATA", "ProgramFiles"] {
+            if let Some(base) = std::env::var_os(var) {
+                let base = PathBuf::from(base);
+                // Kullanıcı başına kurulum (NSIS) ya da makine geneli kurulum.
+                c.push(base.join("Nehir").join("nehir.exe"));
+                c.push(base.join("Programs").join("Nehir").join("nehir.exe"));
+            }
+        }
+    }
     c
 }
 
-fn launch_app() -> bool {
+#[cfg(unix)]
+fn is_executable(p: &std::path::Path) -> bool {
     use std::os::unix::fs::PermissionsExt;
+    std::fs::metadata(p).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false)
+}
+
+#[cfg(windows)]
+fn is_executable(p: &std::path::Path) -> bool {
+    p.is_file()
+}
+
+/// Tarayıcı kapansa bile uygulama yaşasın: Unix'te ayrı süreç grubu, Windows'ta ayrık ve konsolsuz süreç.
+fn detach(cmd: &mut Command) -> &mut Command {
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt;
+        cmd.process_group(0)
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const DETACHED_PROCESS: u32 = 0x0000_0008;
+        const CREATE_NEW_PROCESS_GROUP: u32 = 0x0000_0200;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP | CREATE_NO_WINDOW)
+    }
+}
+
+fn launch_app() -> bool {
     for exe in app_candidates() {
-        let ok = std::fs::metadata(&exe).map(|m| m.is_file() && m.permissions().mode() & 0o111 != 0).unwrap_or(false);
-        if !ok {
+        if !is_executable(&exe) {
             continue;
         }
-        // Tarayıcı kapansa bile uygulama yaşasın: ayrı süreç grubu.
-        if Command::new(&exe)
-            .arg("--background")
-            .stdin(Stdio::null())
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .process_group(0)
-            .spawn()
-            .is_ok()
-        {
+        let mut cmd = Command::new(&exe);
+        cmd.arg("--background").stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null());
+        if detach(&mut cmd).spawn().is_ok() {
             return true;
         }
     }

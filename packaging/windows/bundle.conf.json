@@ -1,0 +1,38 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "bundle": {
+    "active": true,
+    "targets": [
+      "nsis"
+    ],
+    "publisher": "Nehir",
+    "shortDescription": "Hızlı, çok bağlantılı indirme yöneticisi",
+    "icon": [
+      "icons/32x32.png",
+      "icons/128x128.png",
+      "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/nehir-native-host"
+    ],
+    "resources": {
+      "../../extension/dist/chrome": "extension/chrome",
+      "../../extension/dist/firefox": "extension/firefox"
+    },
+    "windows": {
+      "webviewInstallMode": {
+        "type": "downloadBootstrapper",
+        "silent": true
+      },
+      "nsis": {
+        "installMode": "currentUser",
+        "languages": [
+          "Turkish",
+          "English"
+        ],
+        "displayLanguageSelector": false,
+        "installerHooks": "../../packaging/windows/installer-hooks.nsh"
+      }
+    }
+  }
+}

@@ -1,5 +1,7 @@
 //! `packaging/nehir-nettune` yardımcısını sahte bir kök dizinde ve sahte `sysctl` ile sınar.
 //! Gerçek sistem ayarlarına DOKUNMAZ (NEHIR_NETTUNE_ROOT ayarlıyken yönetici yetkisi de istenmez).
+//! Yardımcı bir `sh` betiğidir ve yalnızca Linux içindir; Windows'ta bu testler derlenmez.
+#![cfg(unix)]
 
 use std::fs;
 use std::os::unix::fs::PermissionsExt;

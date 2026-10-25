@@ -61,7 +61,8 @@ async fn download_endpoint_validates_and_ignores_save_dir() {
 
     // Eklenti hedef klasörü seçemez (saveDir yok sayılır).
     let evil = tmp.path().join("evil");
-    let body = format!("{{\"url\":\"http://127.0.0.1:1/a.zip\",\"saveDir\":\"{}\"}}", evil.display());
+    // JSON'u elle birleştirme: Windows yollarındaki `\` kaçışsız kalırsa gövde geçersiz olur.
+    let body = serde_json::json!({ "url": "http://127.0.0.1:1/a.zip", "saveDir": evil.to_string_lossy() }).to_string();
     let r = post(&body).send().await.unwrap();
     assert_eq!(r.status(), 200);
     tokio::time::sleep(std::time::Duration::from_millis(300)).await;
@@ -77,18 +78,15 @@ async fn download_endpoint_validates_and_ignores_save_dir() {
 
 #[tokio::test]
 async fn formats_endpoint_lists_resolutions_via_ytdlp() {
-    use std::os::unix::fs::PermissionsExt;
     let tmp = tempfile::tempdir().unwrap();
     // Sahte yt-dlp: sabit bir -J çıktısı verir (gerçek ağ gerekmez).
-    let fake = tmp.path().join("fake-yt-dlp");
-    std::fs::write(
-        &fake,
-        r#"#!/bin/sh
-echo '{"title":"Deneme","duration":12.5,"formats":[{"vcodec":"none","acodec":"mp4a","ext":"m4a","filesize":1000},{"vcodec":"avc1","acodec":"none","height":1080,"ext":"mp4","filesize":9000},{"vcodec":"avc1","acodec":"none","height":480,"ext":"mp4","filesize":3000}]}'
-"#,
-    )
-    .unwrap();
-    std::fs::set_permissions(&fake, std::fs::Permissions::from_mode(0o755)).unwrap();
+    const JSON: &str = r#"{"title":"Deneme","duration":12.5,"formats":[{"vcodec":"none","acodec":"mp4a","ext":"m4a","filesize":1000},{"vcodec":"avc1","acodec":"none","height":1080,"ext":"mp4","filesize":9000},{"vcodec":"avc1","acodec":"none","height":480,"ext":"mp4","filesize":3000}]}"#;
+    #[cfg(unix)]
+    let (fake, script) = (tmp.path().join("fake-yt-dlp"), format!("#!/bin/sh\necho '{JSON}'\n"));
+    #[cfg(windows)]
+    let (fake, script) = (tmp.path().join("fake-yt-dlp.cmd"), format!("@echo off\r\necho {JSON}\r\n"));
+    std::fs::write(&fake, script).unwrap();
+    nehir_core::platform::set_unix_mode(&fake, 0o755).unwrap();
 
     let m = Manager::new(Paths { config_dir: tmp.path().join("c"), data_dir: tmp.path().join("d") });
     let mut s = m.settings();

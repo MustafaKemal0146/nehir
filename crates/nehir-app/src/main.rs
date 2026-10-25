@@ -151,6 +151,7 @@ fn answer_after_all(app: AppHandle, state: State<AppState>, now: bool) {
 }
 
 /// Chromium tabanlı tarayıcıda eklentiler sayfasını açar (ilk kurulum sihirbazı için).
+#[cfg(unix)]
 #[tauri::command]
 fn open_extensions_page() -> Res<String> {
     const BROWSERS: &[(&str, &str)] = &[
@@ -177,9 +178,38 @@ fn open_extensions_page() -> Res<String> {
     Err("no_browser".into())
 }
 
+/// Windows'ta tarayıcılar "App Paths" kaydıyla bulunur; `cmd /C start` bunu çözer ve tarayıcı
+/// kurulu değilse başarısız olur (çıkış kodu ≠ 0), böylece sıradakine geçilir.
+#[cfg(windows)]
+#[tauri::command]
+fn open_extensions_page() -> Res<String> {
+    use std::os::windows::process::CommandExt;
+    const BROWSERS: &[(&str, &str, &str)] = &[
+        ("chrome", "Google Chrome", "chrome://extensions/"),
+        ("msedge", "Microsoft Edge", "edge://extensions/"),
+        ("brave", "Brave", "brave://extensions/"),
+        ("vivaldi", "Vivaldi", "vivaldi://extensions/"),
+    ];
+    for (exe, name, url) in BROWSERS {
+        let ok = Command::new("cmd")
+            .args(["/C", "start", "", exe, url])
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .map(|s| s.success())
+            .unwrap_or(false);
+        if ok {
+            return Ok(name.to_string());
+        }
+    }
+    Err("no_browser".into())
+}
+
 #[tauri::command]
 fn open_extension_folder() -> Res<()> {
-    xdg_open(&extension_dir().ok_or("eklenti klasörü bulunamadı")?)
+    open_path(&extension_dir().ok_or("eklenti klasörü bulunamadı")?)
 }
 
 #[tauri::command]
@@ -205,8 +235,13 @@ fn extension_dir() -> Option<PathBuf> {
     if let Some(p) = std::env::var_os("NEHIR_EXTENSION_DIR") {
         c.push(p.into());
     }
+    #[cfg(unix)]
     c.push("/usr/share/nehir/extension/chrome".into());
     if let Ok(exe) = std::env::current_exe() {
+        // Windows kurulumu: nehir.exe'nin yanında extension\chrome.
+        if let Some(dir) = exe.parent() {
+            c.push(dir.join("extension").join("chrome"));
+        }
         // geliştirme: target/{debug,release}/nehir → ../../extension/dist/chrome
         for up in exe.ancestors().skip(1).take(4) {
             c.push(up.join("extension/dist/chrome"));
@@ -219,12 +254,31 @@ fn native_host_binary() -> Option<PathBuf> {
     let mut c: Vec<PathBuf> = Vec::new();
     if let Ok(exe) = std::env::current_exe() {
         if let Some(dir) = exe.parent() {
-            c.push(dir.join("nehir-native-host"));
+            c.push(dir.join(nehir_core::platform::exe_name("nehir-native-host")));
         }
     }
-    c.push("/usr/lib/nehir/nehir-native-host".into());
-    c.push("/usr/bin/nehir-native-host".into());
+    #[cfg(unix)]
+    {
+        c.push("/usr/lib/nehir/nehir-native-host".into());
+        c.push("/usr/bin/nehir-native-host".into());
+    }
     c.into_iter().find(|p| p.exists())
+}
+
+/// Native messaging kaydını yapar ve kaydedilen tarayıcıların adlarını döndürür.
+/// Linux: tarayıcıların manifest klasörlerine yazar. Windows: manifestleri veri klasörüne yazar,
+/// tarayıcıların kayıt defteri anahtarlarını bunlara yöneltir.
+fn register_native_hosts() -> Res<Vec<String>> {
+    let host = native_host_binary().ok_or("nehir-native-host bulunamadı")?;
+    let ids = [native::CHROME_EXTENSION_ID.to_string()];
+    #[cfg(unix)]
+    let done = {
+        let home = dirs::home_dir().ok_or("ev dizini bulunamadı")?;
+        native::register_for_user(&home, &host, &ids)
+    };
+    #[cfg(windows)]
+    let done = native::register_for_user(&Paths::default_dirs().data_dir.join("native-messaging"), &host, &ids);
+    Ok(done.into_iter().map(|r| r.browser.to_string()).collect())
 }
 
 #[tauri::command]
@@ -236,32 +290,28 @@ fn get_status(state: State<AppState>) -> serde_json::Value {
         "port": s.port,
         "language": s.resolved_language(),
         "listening": state.listening.load(Ordering::SeqCst),
+        "net_supported": cfg!(unix),
         "extension_path": extension_dir().map(|p| p.to_string_lossy().into_owned()),
         "extensions_seen": state.downloads.extensions_seen(),
     })
 }
 
-fn xdg_open(path: &std::path::Path) -> Res<()> {
-    Command::new("xdg-open")
-        .arg(path)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map(|_| ())
-        .map_err(|e| format!("xdg-open başlatılamadı: {e}"))
+fn open_path(path: &std::path::Path) -> Res<()> {
+    nehir_core::platform::open_path(path)
 }
 
 #[tauri::command]
 fn open_file(state: State<AppState>, id: String) -> Res<()> {
     let d = state.downloads.get(parse_id(&id)?).ok_or("kayıt bulunamadı")?;
-    xdg_open(&d.final_path())
+    open_path(&d.final_path())
 }
 
+/// Klasörü açar; dosya varsa Windows'ta Gezgin onu seçili gösterir.
 #[tauri::command]
 fn open_folder(state: State<AppState>, id: String) -> Res<()> {
     let d = state.downloads.get(parse_id(&id)?).ok_or("kayıt bulunamadı")?;
-    xdg_open(&d.dir)
+    let file = d.final_path();
+    if file.exists() { nehir_core::platform::reveal_path(&file) } else { open_path(&d.dir) }
 }
 
 #[tauri::command]
@@ -281,10 +331,7 @@ async fn pick_folder(app: AppHandle) -> Option<String> {
 
 #[tauri::command]
 fn register_native_host() -> Res<Vec<String>> {
-    let host = native_host_binary().ok_or("nehir-native-host bulunamadı")?;
-    let home = dirs::home_dir().ok_or("ev dizini bulunamadı")?;
-    let done = native::register_for_user(&home, &host, &[native::CHROME_EXTENSION_ID.to_string()]);
-    Ok(done.into_iter().map(|r| r.browser.to_string()).collect())
+    register_native_hosts()
 }
 
 #[tauri::command]
@@ -379,10 +426,21 @@ fn show_main(app: &AppHandle) {
     }
 }
 
+/// Windows: oturum açılınca başlatma, `HKCU\Software\Microsoft\Windows\CurrentVersion\Run` girdisiyle.
+#[cfg(windows)]
+fn set_autostart(on: bool) {
+    let Ok(exe) = std::env::current_exe() else { return };
+    if let Err(e) = nehir_core::platform::set_run_at_login("Nehir", &exe, on) {
+        tracing::warn!("otomatik başlatma ayarlanamadı: {e}");
+    }
+}
+
+#[cfg(unix)]
 fn autostart_file() -> Option<PathBuf> {
     dirs::config_dir().map(|d| d.join("autostart/nehir.desktop"))
 }
 
+#[cfg(unix)]
 fn set_autostart(on: bool) {
     let Some(file) = autostart_file() else { return };
     if !on {
@@ -511,36 +569,47 @@ fn notify(app: &AppHandle, d: &nehir_core::model::Download, completed: bool, tr:
             n.action("retry", if tr { "Tekrar dene" } else { "Retry" });
         }
     }
-    let handle = match n.show() {
-        Ok(h) => h,
-        Err(e) => {
+    // Windows: notify-rust düğme/yanıt desteği sunmaz (`show()` bir tutamaç döndürmez); sade bildirim gösterilir.
+    #[cfg(windows)]
+    {
+        let _ = (app, with_actions);
+        if let Err(e) = n.show() {
             tracing::warn!("bildirim gösterilemedi: {e}");
+        }
+    }
+    #[cfg(unix)]
+    {
+        let handle = match n.show() {
+            Ok(h) => h,
+            Err(e) => {
+                tracing::warn!("bildirim gösterilemedi: {e}");
+                return;
+            }
+        };
+        if !with_actions {
             return;
         }
-    };
-    if !with_actions {
-        return;
-    }
-    let app = app.clone();
-    let (id, path, dir) = (d.id, d.final_path(), d.dir.clone());
-    WAITING_NOTIFICATIONS.fetch_add(1, Ordering::SeqCst);
-    std::thread::spawn(move || {
-        handle.wait_for_action(|action| match action {
-            "open" => {
-                let _ = xdg_open(&path);
-            }
-            "folder" => {
-                let _ = xdg_open(&dir);
-            }
-            "retry" => app.state::<AppState>().downloads.resume(id),
-            "default" => {
-                let a = app.clone();
-                let _ = app.run_on_main_thread(move || show_main(&a));
-            }
-            _ => {}
+        let app = app.clone();
+        let (id, path, dir) = (d.id, d.final_path(), d.dir.clone());
+        WAITING_NOTIFICATIONS.fetch_add(1, Ordering::SeqCst);
+        std::thread::spawn(move || {
+            handle.wait_for_action(|action| match action {
+                "open" => {
+                    let _ = open_path(&path);
+                }
+                "folder" => {
+                    let _ = open_path(&dir);
+                }
+                "retry" => app.state::<AppState>().downloads.resume(id),
+                "default" => {
+                    let a = app.clone();
+                    let _ = app.run_on_main_thread(move || show_main(&a));
+                }
+                _ => {}
+            });
+            WAITING_NOTIFICATIONS.fetch_sub(1, Ordering::SeqCst);
         });
-        WAITING_NOTIFICATIONS.fetch_sub(1, Ordering::SeqCst);
-    });
+    }
 }
 
 // ---------- İndirmeler bitince ----------
@@ -593,12 +662,9 @@ fn check_after_all(app: &AppHandle) {
 
 fn run_after_all(app: &AppHandle, action: &str) {
     tracing::info!("indirmeler bitti, işlem: {action}");
-    let systemctl = |verb: &str| {
-        Command::new("systemctl").arg(verb).stdin(Stdio::null()).stdout(Stdio::null()).stderr(Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
-    };
     let ok = match action {
-        "sleep" => systemctl("suspend"),
-        "shutdown" => systemctl("poweroff"),
+        "sleep" => nehir_core::platform::suspend(),
+        "shutdown" => nehir_core::platform::power_off(),
         "quit" => {
             app.exit(0);
             true
@@ -675,9 +741,9 @@ fn main() {
             let handle = app.handle().clone();
 
             // Kurulu tarayıcılara native messaging kaydı (uygulama kapalıyken eklentinin onu başlatabilmesi için).
-            if let (Some(host), Some(home)) = (native_host_binary(), dirs::home_dir()) {
-                let done = native::register_for_user(&home, &host, &[native::CHROME_EXTENSION_ID.to_string()]);
-                tracing::info!("native host kaydedildi: {}", done.iter().map(|r| r.browser).collect::<Vec<_>>().join(", "));
+            match register_native_hosts() {
+                Ok(done) => tracing::info!("native host kaydedildi: {}", done.join(", ")),
+                Err(e) => tracing::info!("native host kaydedilmedi: {e}"),
             }
 
             start_bridge(&handle);

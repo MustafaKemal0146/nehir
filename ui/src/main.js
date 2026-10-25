@@ -1,6 +1,9 @@
 import { api, isTauri } from './api.js';
 import { icon, hydrateIcons } from './icons.js';
 import { t, setLanguage, applyI18n, getLanguage } from './i18n.js';
+// JS içindeki şablon metinlerde "/src/logo.png" yazmak yayın sürümünde çalışmaz (Vite yalnızca import'ları
+// ve HTML'deki adresleri işler); bu yüzden içe aktarılır.
+import logoUrl from './logo.png';
 
 const $ = (sel, root = document) => root.querySelector(sel);
 const el = (tag, cls, html) => { const e = document.createElement(tag); if (cls) e.className = cls; if (html != null) e.innerHTML = html; return e; };
@@ -583,7 +586,7 @@ async function renderWizard() {
   const token = ++wizRender; // eşzamansız çizimler çakışmasın: yalnızca en son çizim tamamlanır
   const body = $('#wizard-body');
   body.innerHTML = '';
-  const head = el('div', 'wiz-head', `<img src="/src/logo.png" width="40" height="40" alt=""><div><h3>${esc(t('wiz.title'))}</h3><div class="motto">${esc(t('motto'))}</div></div>`);
+  const head = el('div', 'wiz-head', `<img src="${logoUrl}" width="40" height="40" alt=""><div><h3>${esc(t('wiz.title'))}</h3><div class="motto">${esc(t('motto'))}</div></div>`);
   const dots = el('div', 'wiz-dots');
   for (let i = 0; i < WIZ_STEPS; i++) dots.append(el('i', i === wizStep ? 'on' : i < wizStep ? 'done' : ''));
   body.append(head, dots);
@@ -687,6 +690,8 @@ async function main() {
   settings = await api.getSettings();
   await syncLanguage();
   applyI18n();
+  // Ağ optimizasyonu yalnızca Linux'ta var (TCP/BBR ayarları, polkit); Windows'ta bölüm gizlenir.
+  if (status && status.net_supported === false) $('#btn-net').style.display = 'none';
   for (const d of await api.list()) downloads.set(d.id, d);
   renderNav();
   renderList();

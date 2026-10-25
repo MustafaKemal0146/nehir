@@ -16,6 +16,24 @@ jobs:
       - name: Test (arayüz kütüphanesi gerektirmeyen paketler)
         run: cargo test -p nehir-core -p nehir-host -p nehir-daemon
 
+  windows:
+    name: Windows (çekirdek testleri + masaüstü kabuğu derlemesi)
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Çekirdek, host ve arayüzsüz sürüm testleri
+        run: cargo test -p nehir-core -p nehir-host -p nehir-daemon
+      - name: Arayüz (Tauri gömülü dosyalara ihtiyaç duyar)
+        run: npm ci && npm run build
+        working-directory: ui
+      - name: Masaüstü kabuğu (Tauri) derlemesi
+        run: cargo build -p nehir-app
+
   web:
     name: Arayüz ve eklenti derlemesi
     runs-on: ubuntu-24.04

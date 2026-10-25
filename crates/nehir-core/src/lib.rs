@@ -5,6 +5,7 @@ pub mod manager;
 pub mod model;
 pub mod native;
 pub mod nettune;
+pub mod platform;
 pub mod settings;
 pub mod util;
 pub mod video;

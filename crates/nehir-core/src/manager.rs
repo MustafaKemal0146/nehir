@@ -604,6 +604,7 @@ impl Manager {
             // Aynı anda gelen başka bir indirme aynı adı almasın.
             let work = dir.join(WORK_DIR_NAME);
             let _ = std::fs::create_dir_all(&work);
+            crate::platform::hide_path(&work); // Windows'ta baştaki nokta gizlemez; nitelik gerekir.
             let _ = std::fs::OpenOptions::new().write(true).create(true).truncate(true).open(work.join(format!("{name}.nehirpart")));
 
             let segments = if info.ranges {
@@ -652,6 +653,8 @@ impl Manager {
                     target = d.dir.join(util::unique_file_name(&d.dir, &d.file_name));
                 }
                 tokio::fs::rename(d.part_path(), &target).await.map_err(|e| format!("dosya taşınamadı: {e}"))?;
+                // Windows: tarayıcı indirmeleri gibi "internetten geldi" işareti koy (SmartScreen/Defender için).
+                crate::platform::mark_downloaded(&target, &d.url, d.referer.as_deref());
                 let _ = std::fs::remove_dir(d.work_dir());
                 if let Some(expected) = d.checksum_expected.clone() {
                     self.update(id, |it| {
