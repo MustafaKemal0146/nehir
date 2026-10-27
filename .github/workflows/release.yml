@@ -79,5 +79,5 @@ jobs:
           sha256sum * > sha256sums.txt
           cd ..
           VERSION="${GITHUB_REF_NAME#v}"
-          awk -v v="$VERSION" '$0 ~ "^## \["v"\]" {f=1; next} /^## \[/ {f=0} f' CHANGELOG.md > notes.md
+          awk -v h="## [$VERSION]" 'index($0,h)==1{f=1;next} /^## \[/{f=0} f' CHANGELOG.md > notes.md
           gh release create "$GITHUB_REF_NAME" out/* --title "Nehir $GITHUB_REF_NAME" --notes-file notes.md
