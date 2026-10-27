@@ -34,5 +34,10 @@ uuid = { version = "1", features = ["v4", "serde"] }
 dirs = "5"
 url = "2"
 
+[target.'cfg(windows)'.dependencies]
+# Windows bildirimleri: tıklama ve düğme geri çağrısı için doğrudan WinRT toast.
+tauri-winrt-notification = "0.8"
+winreg = "0.55"
+
 [build-dependencies]
-tauri-build = "2"
+tauri-build = { version = "2", features = [] }

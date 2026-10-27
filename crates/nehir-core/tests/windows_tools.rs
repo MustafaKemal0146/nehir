@@ -48,7 +48,7 @@ async fn install_tools_download_video_and_cancel_kills_the_tree() {
     let client = nehir_core::engine::build_client().unwrap();
 
     // 1) Kurulum: yt-dlp.exe + deno.exe + ffmpeg.exe/ffprobe.exe
-    video::install_ytdlp(&client, &p).await.expect("install_ytdlp");
+    video::install_ytdlp(&client, &p, |_| {}).await.expect("install_ytdlp");
     let ytdlp = video::locate_ytdlp("", &p).expect("yt-dlp bulunamadı");
     assert!(video::locate_deno(&p).is_some(), "deno bulunamadı");
     assert!(video::locate_ffmpeg(&p).is_some(), "ffmpeg bulunamadı");

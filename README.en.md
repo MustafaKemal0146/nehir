@@ -62,6 +62,8 @@ Linux lacks a download manager that **steps into your browser and takes over dow
 
 ## 📦 Installation
 
+> 🪟 **Windows 10/11:** download `Nehir_<version>_x64-setup.exe` from [Releases](https://github.com/MustafaKemal0146/nehir/releases/latest) and run it; you can choose the install folder. The steps below are for Linux.
+
 > **Tested on:** Zorin OS 18 (Ubuntu 24.04 based). Expected to work on Ubuntu 22.04+/Debian 12+ and derivatives.
 
 ### 1. Install the app
@@ -69,7 +71,7 @@ Linux lacks a download manager that **steps into your browser and takes over dow
 Download the `.deb` from [**Releases**](https://github.com/MustafaKemal0146/nehir/releases/latest):
 
 ```bash
-sudo apt install ./nehir_1.1.0_amd64.deb
+sudo apt install ./nehir_1.2.0_amd64.deb
 ```
 
 Open **Nehir** from your menu. (`apt` installs the required libraries automatically.)

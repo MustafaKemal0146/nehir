@@ -2435,7 +2435,7 @@ dependencies = [
 
 [[package]]
 name = "nehir-app"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "dirs 5.0.1",
  "nehir-core",
@@ -2448,17 +2448,19 @@ dependencies = [
  "tauri-plugin-dialog",
  "tauri-plugin-notification",
  "tauri-plugin-single-instance",
+ "tauri-winrt-notification",
  "tokio",
  "tokio-util",
  "tracing",
  "tracing-subscriber",
  "url",
  "uuid",
+ "winreg 0.55.0",
 ]
 
 [[package]]
 name = "nehir-core"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "axum",
  "dirs 5.0.1",
@@ -2487,7 +2489,7 @@ dependencies = [
 
 [[package]]
 name = "nehir-daemon"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "nehir-core",
  "tokio",
@@ -2498,7 +2500,7 @@ dependencies = [
 
 [[package]]
 name = "nehir-host"
-version = "1.1.0"
+version = "1.2.0"
 dependencies = [
  "serde_json",
 ]

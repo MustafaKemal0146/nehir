@@ -289,15 +289,59 @@ pub async fn run(
         None => child.wait().await.map_err(|e| e.to_string())?,
     };
     if status.success() {
-        Ok(final_path)
+        // Çıkış başarılıysa ama yol bildirilmediyse (ör. dosya zaten vardı) sessizce "duraklatıldı" demek yerine
+        // klasördeki en yeni dosyayı bulur; bulunamazsa hatayı gösterir.
+        if final_path.is_none() {
+            final_path = newest_file(&opts.out_dir);
+        }
+        match final_path {
+            Some(p) => Ok(Some(p)),
+            None => Err(last_error.unwrap_or_else(|| "yt-dlp bitti ama indirilen dosya bulunamadı".into())),
+        }
     } else {
         Err(last_error.unwrap_or_else(|| format!("yt-dlp {} koduyla çıktı", status.code().unwrap_or(-1))))
     }
 }
 
-async fn download_bytes(client: &reqwest::Client, url: &str) -> Result<Vec<u8>, String> {
-    let r = client.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
-    r.bytes().await.map(|b| b.to_vec()).map_err(|e| e.to_string())
+/// Kurulum ilerlemesi: `name` aracı, `step`/`steps` kaçıncı araç olduğu, `done`/`total` bayt (toplam bilinmiyorsa 0).
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct InstallProgress {
+    pub name: String,
+    pub step: u32,
+    pub steps: u32,
+    pub done: u64,
+    pub total: u64,
+}
+
+/// Klasörde son 10 dakikada değişen en yeni dosya.
+fn newest_file(dir: &Path) -> Option<PathBuf> {
+    let now = std::time::SystemTime::now();
+    std::fs::read_dir(dir)
+        .ok()?
+        .filter_map(|e| e.ok())
+        .filter_map(|e| {
+            let m = e.metadata().ok()?;
+            let age = now.duration_since(m.modified().ok()?).ok()?;
+            (m.is_file() && age.as_secs() < 600).then(|| (m.modified().unwrap(), e.path()))
+        })
+        .max_by_key(|(t, _)| *t)
+        .map(|(_, p)| p)
+}
+
+async fn download_bytes(client: &reqwest::Client, url: &str, mut on_bytes: impl FnMut(u64, u64)) -> Result<Vec<u8>, String> {
+    let mut r = client.get(url).send().await.and_then(|r| r.error_for_status()).map_err(|e| e.to_string())?;
+    let total = r.content_length().unwrap_or(0);
+    let mut buf = Vec::with_capacity(total as usize);
+    let mut last = std::time::Instant::now();
+    while let Some(chunk) = r.chunk().await.map_err(|e| e.to_string())? {
+        buf.extend_from_slice(&chunk);
+        if last.elapsed().as_millis() >= 100 {
+            on_bytes(buf.len() as u64, total);
+            last = std::time::Instant::now();
+        }
+    }
+    on_bytes(buf.len() as u64, total);
+    Ok(buf)
 }
 
 async fn install_binary(paths: &Paths, name: &str, data: Vec<u8>) -> Result<PathBuf, String> {
@@ -324,22 +368,30 @@ const DENO_URL: &str = "https://github.com/denoland/deno/releases/latest/downloa
 
 /// yt-dlp'nin bağımsız ikilisini (Linux'ta `yt-dlp_linux`, Windows'ta `yt-dlp.exe`) kullanıcı dizinine
 /// indirir (kullanıcı isteğiyle). YouTube için gereken `deno` JS çalışma ortamı da (yoksa) birlikte kurulur.
-pub async fn install_ytdlp(client: &reqwest::Client, paths: &Paths) -> Result<PathBuf, String> {
-    let bytes = download_bytes(client, YTDLP_URL).await?;
+pub async fn install_ytdlp(client: &reqwest::Client, paths: &Paths, on_progress: impl Fn(InstallProgress)) -> Result<PathBuf, String> {
+    let need_deno = locate_deno(paths).is_none();
+    #[cfg(windows)]
+    let need_ffmpeg = locate_ffmpeg(paths).is_none();
+    #[cfg(not(windows))]
+    let need_ffmpeg = false;
+    let steps = 1 + need_deno as u32 + need_ffmpeg as u32;
+    let on_progress = &on_progress;
+    let report = |name: &'static str, step: u32| move |done: u64, total: u64| on_progress(InstallProgress { name: name.into(), step, steps, done, total });
+    let bytes = download_bytes(client, YTDLP_URL, report("yt-dlp", 1)).await?;
     if bytes.len() < 1_000_000 {
         return Err("İndirilen yt-dlp beklenenden küçük".into());
     }
     let target = install_binary(paths, "yt-dlp", bytes).await?;
-    if locate_deno(paths).is_none() {
+    if need_deno {
         // deno olmadan YouTube bazı biçimleri vermez; hata yt-dlp kurulumunu engellemesin.
-        if let Err(e) = install_deno(client, paths).await {
+        if let Err(e) = install_deno(client, paths, report("deno", 2)).await {
             tracing::warn!("deno kurulamadı: {e}");
         }
     }
     #[cfg(windows)]
-    if locate_ffmpeg(paths).is_none() {
+    if need_ffmpeg {
         // ffmpeg olmadan yt-dlp yalnızca tek dosyalı (düşük çözünürlüklü) biçimleri indirebilir; yine de engel olmasın.
-        if let Err(e) = install_ffmpeg(client, paths).await {
+        if let Err(e) = install_ffmpeg(client, paths, report("ffmpeg", steps)).await {
             tracing::warn!("ffmpeg kurulamadı: {e}");
         }
     }
@@ -360,8 +412,8 @@ fn read_zip_entry(zip_bytes: &[u8], suffix: &str) -> Result<Vec<u8>, String> {
     Ok(out)
 }
 
-async fn install_deno(client: &reqwest::Client, paths: &Paths) -> Result<(), String> {
-    let zip_bytes = download_bytes(client, DENO_URL).await?;
+async fn install_deno(client: &reqwest::Client, paths: &Paths, on_bytes: impl FnMut(u64, u64)) -> Result<(), String> {
+    let zip_bytes = download_bytes(client, DENO_URL, on_bytes).await?;
     let name = exe_name("deno");
     let bin = tokio::task::spawn_blocking(move || read_zip_entry(&zip_bytes, &name)).await.map_err(|e| e.to_string())??;
     if bin.len() < 1_000_000 {
@@ -376,8 +428,8 @@ async fn install_deno(client: &reqwest::Client, paths: &Paths) -> Result<(), Str
 const FFMPEG_URL: &str = "https://github.com/yt-dlp/FFmpeg-Builds/releases/latest/download/ffmpeg-master-latest-win64-gpl.zip";
 
 #[cfg(windows)]
-async fn install_ffmpeg(client: &reqwest::Client, paths: &Paths) -> Result<(), String> {
-    let zip_bytes = download_bytes(client, FFMPEG_URL).await?;
+async fn install_ffmpeg(client: &reqwest::Client, paths: &Paths, on_bytes: impl FnMut(u64, u64)) -> Result<(), String> {
+    let zip_bytes = download_bytes(client, FFMPEG_URL, on_bytes).await?;
     for name in ["ffmpeg", "ffprobe"] {
         let (zb, entry) = (zip_bytes.clone(), format!("bin/{}", exe_name(name)));
         let bin = tokio::task::spawn_blocking(move || read_zip_entry(&zb, &entry)).await.map_err(|e| e.to_string())??;

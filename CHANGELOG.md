@@ -2,9 +2,15 @@
 
 Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme [SemVer](https://semver.org/lang/tr/).
 
-## [Yayınlanmadı]
+## [1.2.0]: 2026-10-27
+
+Bu sürümle Nehir **Windows 10/11'de de çalışıyor**: kurulum paketi (`Nehir_1.2.0_x64-setup.exe`) ve Linux `.deb` paketi birlikte yayınlanır.
 
 ### Eklendi
+- **yt-dlp / deno / ffmpeg kurulumunda ilerleme:** düğmede `yt-dlp %45 · 1/3` gibi yüzde ve adım, düğme dolum çubuğu olur; üstüne gelince indirilen boyut görünür.
+- **Windows bildirimleri düğmeli:** tamamlanınca *Aç* / *Klasörü göster*, başarısızlıkta *Tekrar dene*; bildirime tıklamak Nehir'i öne getirir. Bildirimler "Nehir" adıyla görünür.
+- Kurulum sihirbazında ve tarayıcı bağlantısı penceresinde `chrome://extensions`, `edge://extensions`, `brave://extensions` adreslerini tek tıkla kopyalama.
+- Sürüm yayını için GitHub Actions iş akışı (`release.yml`): `v*` etiketinde Linux `.deb` ile Windows kurulum paketini derleyip sürüme ekler.
 - **Windows 10/11 desteği** (aynı kod tabanı, `cfg` ile). İşletim sistemine bağlı her şey `nehir-core/src/platform.rs` içinde toplandı (konumlu yazma, yer ayırma, boş alan, süreç ağacı, dosya açma, uyut/kapat, otomatik başlatma, dil).
 - Windows'ta alt süreçlerin (yt-dlp → deno, ffmpeg) iptalde birlikte sonlandırılması için **Job Object**.
 - Windows native messaging: manifestler ve her tarayıcı (Chrome, Edge, Brave, Chromium, Firefox) için `HKCU` kayıt defteri anahtarları; `nehir-native-host.exe` konsol penceresi açmadan ve ayrık başlatır.
@@ -18,6 +24,7 @@ Biçim [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme [Se
 - Windows'ta veri klasörü LocalAppData'dır (Roaming değil).
 
 ### Düzeltildi
+- Video indirmesi yt-dlp dosya yolunu bildirmeden bittiğinde indirme sessizce "Duraklatıldı" görünüyordu; artık dosya bulunur ya da gerçek hata gösterilir.
 - İlk açılış sihirbazındaki logo yayın sürümünde yüklenmiyordu (`/src/logo.png` JS içinde Vite tarafından işlenmez).
 - `extension/build.mjs`, Node 24'te Windows'ta yolda ASCII olmayan karakter varsa (`fs.cpSync` hatası) çöküyordu.
 

@@ -21,6 +21,19 @@ const rows = new Map();
 const CATS = ['video', 'music', 'document', 'archive', 'program', 'image', 'other'];
 const ACTIVE = new Set(['probing', 'downloading', 'processing']);
 
+
+// yt-dlp (+ deno, ffmpeg) kurulumu: düğmenin üstünde yüzde ve adım gösterir, düğme dolum çubuğuna dönüşür.
+async function installYtdlpWithProgress(btn) {
+  const un = await api.on('tool-install-progress', (p) => {
+    const pct = p.total > 0 ? Math.min(100, Math.floor((p.done / p.total) * 100)) : null;
+    const size = p.total > 0 ? `${fmtSize(p.done)} / ${fmtSize(p.total)}` : fmtSize(p.done);
+    btn.textContent = `${p.name} ${pct != null ? '%' + pct : size} · ${p.step}/${p.steps}`;
+    btn.title = size;
+    btn.style.background = pct != null ? `linear-gradient(90deg, var(--accent, #1f6feb) ${pct}%, transparent ${pct}%)` : '';
+  });
+  try { await api.installYtdlp(); } finally { un(); btn.style.background = ''; btn.title = ''; }
+}
+
 // ---------- Biçimlendirme ----------
 function fmtSize(n) {
   if (!(n > 0)) return '—';
@@ -165,7 +178,7 @@ function updateRow(d) {
     b.style.cssText = 'padding:2px 10px;font-size:12px';
     b.onclick = async (e) => {
       e.stopPropagation(); b.disabled = true; b.textContent = t('settings.installing');
-      try { await api.installYtdlp(); toast(t('toast.ytdlpInstalled'), 'ok'); await api.resume(d.id); } catch (err) { toast(`${t('toast.error')}: ${err}`, 'bad'); b.disabled = false; b.textContent = label; }
+      try { await installYtdlpWithProgress(b); toast(t('toast.ytdlpInstalled'), 'ok'); await api.resume(d.id); } catch (err) { toast(`${t('toast.error')}: ${err}`, 'bad'); b.disabled = false; b.textContent = label; }
     };
     row.querySelector('.meta').append(b);
   }
@@ -381,7 +394,7 @@ async function openSettings() {
     const inst = el('button', null, esc(t('settings.ytdlpInstall'))); inst.type = 'button';
     inst.onclick = async () => {
       inst.disabled = true; inst.textContent = t('settings.installing');
-      try { await api.installYtdlp(); toast(t('toast.ytdlpInstalled'), 'ok'); status = await api.status(); openSettings(); }
+      try { await installYtdlpWithProgress(inst); toast(t('toast.ytdlpInstalled'), 'ok'); status = await api.status(); openSettings(); }
       catch (e) { toast(`${t('toast.error')}: ${e}`, 'bad'); inst.disabled = false; inst.textContent = t('settings.ytdlpInstall'); }
     };
     yt.append(inst);
@@ -505,6 +518,12 @@ async function openBrowserDialog() {
   const copy = el('button', null, esc(t('browser.copy'))); copy.type = 'button'; copy.style.marginTop = '8px';
   copy.onclick = () => api.copyText(status.extension_path || '');
   steps.append(copy);
+  steps.append(el('p', 'hint', esc(t('wiz.s2.addr'))));
+  for (const a of ['chrome://extensions', 'edge://extensions', 'brave://extensions']) {
+    const b = el('button', null, esc(a)); b.type = 'button'; b.style.cssText = 'margin:0 6px 6px 0';
+    b.onclick = () => { api.copyText(a); toast(t('wiz.s2.addrCopied', { a }), 'ok'); };
+    steps.append(b);
+  }
   steps.append(el('h4', null, esc(t('browser.step2'))), el('p', null, esc(t('browser.step2text'))));
   steps.append(el('h4', null, esc(t('browser.step3'))), el('p', null, esc(t('browser.step3text'))));
   const reg = el('button', 'primary', esc(t('browser.register'))); reg.type = 'button';
@@ -626,6 +645,14 @@ async function renderWizard() {
     copy.onclick = () => { api.copyText(status.extension_path || ''); toast(t('ck.copied'), 'ok'); };
     row.append(open, folder, copy);
     page.append(row, note);
+    page.append(el('p', 'hint', esc(t('wiz.s2.addr'))));
+    const addrs = el('div', 'buttons left');
+    for (const a of ['chrome://extensions', 'edge://extensions', 'brave://extensions']) {
+      const b = el('button', null, `${icon('copy', 16)}<span>${esc(a)}</span>`); b.type = 'button';
+      b.onclick = async () => { try { await api.copyText(a); toast(t('wiz.s2.addrCopied', { a }), 'ok'); } catch (e) { toastError(e); } };
+      addrs.append(b);
+    }
+    page.append(addrs);
     const live = el('div', 'wiz-live');
     const paint = () => {
       const on = Object.values(status.extensions_seen || {}).some(connected);
@@ -645,7 +672,7 @@ async function renderWizard() {
       const inst = el('button', 'primary', esc(t('settings.ytdlpInstall'))); inst.type = 'button';
       inst.onclick = async () => {
         inst.disabled = true; inst.textContent = t('settings.installing');
-        try { await api.installYtdlp(); toast(t('toast.ytdlpInstalled'), 'ok'); renderWizard(); }
+        try { await installYtdlpWithProgress(inst); toast(t('toast.ytdlpInstalled'), 'ok'); renderWizard(); }
         catch (e) { toastError(e); inst.disabled = false; inst.textContent = t('settings.ytdlpInstall'); }
       };
       line.append(inst);

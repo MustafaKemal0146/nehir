@@ -66,6 +66,8 @@ Linux'ta Windows'taki IDM gibi, **tarayıcıya girip indirmeyi kendisi devralan*
 
 ## 📦 Kurulum
 
+> 🪟 **Windows 10/11:** [Releases](https://github.com/MustafaKemal0146/nehir/releases/latest) sayfasından `Nehir_<sürüm>_x64-setup.exe`'yi indirip çalıştır; kurulum klasörünü seçebilirsin. Ayrıntı: [Windows](#-windows). Aşağıdaki adımlar Linux içindir.
+
 > **Test edilen sistem:** Zorin OS 18 (Ubuntu 24.04 tabanlı). Ubuntu 22.04+/Debian 12+ ve türevlerinde çalışması beklenir.
 
 ### 1. Uygulamayı kur
@@ -73,7 +75,7 @@ Linux'ta Windows'taki IDM gibi, **tarayıcıya girip indirmeyi kendisi devralan*
 [**Releases**](https://github.com/MustafaKemal0146/nehir/releases/latest) sayfasından `.deb` dosyasını indir:
 
 ```bash
-sudo apt install ./nehir_1.1.0_amd64.deb
+sudo apt install ./nehir_1.2.0_amd64.deb
 ```
 
 Menüden **Nehir**'i aç. (Gerekli kütüphaneler `apt` tarafından otomatik kurulur.)

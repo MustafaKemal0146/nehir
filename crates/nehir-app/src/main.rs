@@ -315,9 +315,13 @@ fn open_folder(state: State<AppState>, id: String) -> Res<()> {
 }
 
 #[tauri::command]
-async fn install_ytdlp(state: State<'_, AppState>) -> Res<()> {
+async fn install_ytdlp(app: AppHandle, state: State<'_, AppState>) -> Res<()> {
     let client = state.downloads.http_client();
-    video::install_ytdlp(&client, state.downloads.paths()).await.map(|_| ())
+    video::install_ytdlp(&client, state.downloads.paths(), |p| {
+        let _ = app.emit("tool-install-progress", p);
+    })
+    .await
+    .map(|_| ())
 }
 
 #[tauri::command]
@@ -538,6 +542,20 @@ fn spawn_event_forwarder(app: AppHandle) {
 
 // ---------- Bildirimler ----------
 
+/// Windows bildirimlerinin uygulama kimliği (AUMID). Kayıt defterine adıyla yazılır; bildirimde "Nehir" görünür.
+#[cfg(windows)]
+const WIN_APP_ID: &str = "org.nehir.app";
+
+#[cfg(windows)]
+fn register_windows_app_id() {
+    use winreg::{enums::HKEY_CURRENT_USER, RegKey};
+    let hkcu = RegKey::predef(HKEY_CURRENT_USER);
+    if let Ok((key, _)) = hkcu.create_subkey(format!(r"Software\Classes\AppUserModelId\{WIN_APP_ID}")) {
+        let _ = key.set_value("DisplayName", &"Nehir");
+        let _ = key.set_value("IconBackgroundColor", &"FF1F6FEB");
+    }
+}
+
 /// Yanıtı (düğme tıklaması) beklenen bildirim sayısı. Her biri bir iş parçacığı tutar; sınırı aşınca düğmesiz gösterilir.
 static WAITING_NOTIFICATIONS: AtomicUsize = AtomicUsize::new(0);
 const MAX_WAITING_NOTIFICATIONS: usize = 8;
@@ -569,11 +587,39 @@ fn notify(app: &AppHandle, d: &nehir_core::model::Download, completed: bool, tr:
             n.action("retry", if tr { "Tekrar dene" } else { "Retry" });
         }
     }
-    // Windows: notify-rust düğme/yanıt desteği sunmaz (`show()` bir tutamaç döndürmez); sade bildirim gösterilir.
     #[cfg(windows)]
     {
-        let _ = (app, with_actions);
-        if let Err(e) = n.show() {
+        use tauri_winrt_notification::Toast;
+        let _ = n;
+        let mut toast = Toast::new(WIN_APP_ID).title(title).text1(&body);
+        if with_actions {
+            if completed {
+                toast = toast.add_button(if tr { "Aç" } else { "Open" }, "open").add_button(if tr { "Klasörü göster" } else { "Show in folder" }, "folder");
+            } else {
+                toast = toast.add_button(if tr { "Tekrar dene" } else { "Retry" }, "retry");
+            }
+        }
+        let (app, id, path, dir) = (app.clone(), d.id, d.final_path(), d.dir.clone());
+        let res = toast
+            .on_activated(move |action| {
+                match action.as_deref() {
+                    Some("open") => {
+                        let _ = open_path(&path);
+                    }
+                    Some("folder") => {
+                        if path.exists() { let _ = nehir_core::platform::reveal_path(&path); } else { let _ = open_path(&dir); }
+                    }
+                    Some("retry") => app.state::<AppState>().downloads.resume(id),
+                    // Bildirimin kendisine tıklamak Nehir'i öne getirir.
+                    _ => {
+                        let a = app.clone();
+                        let _ = app.run_on_main_thread(move || show_main(&a));
+                    }
+                }
+                Ok(())
+            })
+            .show();
+        if let Err(e) = res {
             tracing::warn!("bildirim gösterilemedi: {e}");
         }
     }
@@ -736,6 +782,8 @@ fn main() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(move |app| {
+            #[cfg(windows)]
+            register_windows_app_id();
             let downloads = tauri::async_runtime::block_on(async { Downloads::new(Paths::default_dirs()) });
             app.manage(AppState { downloads, bridge: Mutex::new(None), listening: Arc::new(AtomicBool::new(false)), after: Mutex::new(AfterAll::default()) });
             let handle = app.handle().clone();
